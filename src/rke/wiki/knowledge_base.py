@@ -54,6 +54,27 @@ class KnowledgeBase:
         self.config = config or load_config()
         self.wiki = wiki or WikiManager(self.config)
         self.vectors = vectors or VectorStore(self.config)
+        # Wire up vector cleanup on wiki delete so expired/evicted pages
+        # don't keep surfacing in semantic search. Idempotent: a stable
+        # method reference prevents duplicate registrations.
+        from ..wiki import manager as _wiki_manager
+        if self._on_wiki_delete not in _wiki_manager._post_delete_hooks:
+            _wiki_manager.register_post_delete(self._on_wiki_delete)
+
+    def _on_wiki_delete(self, page) -> None:
+        """post_delete hook: drop the page's vector chunks from Qdrant.
+
+        Accepts either a WikiPage (preferred — gives full category for
+        precise filter) or a bare slug string (legacy fallback)."""
+        try:
+            if hasattr(page, "category") and hasattr(page, "slug"):
+                self.vectors.delete_by_filter(
+                    {"category": page.category, "slug": page.slug},
+                )
+            else:
+                self.vectors.delete_by_filter({"slug": str(page)})
+        except Exception as exc:
+            log.warning("vector cleanup on delete failed: %s", exc)
 
     # ── Ingest ───────────────────────────────────────────────────
     def add_page(

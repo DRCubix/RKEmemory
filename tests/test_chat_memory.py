@@ -278,3 +278,30 @@ def test_kb_routes_writes_through_knowledge_base(tmp_path: Path):
         f"expected kb.add_page to be called for each persist, "
         f"got {fake_kb.add_page.call_count} calls"
     )
+
+
+def test_kb_post_delete_hook_clears_vector_chunks(tmp_path: Path):
+    """Regression: when a KB-managed page is deleted via WikiManager,
+    its vector chunks must be removed from the store too — otherwise
+    expired/evicted pages keep surfacing in semantic search."""
+    from rke.wiki.knowledge_base import KnowledgeBase
+    from rke.wiki.manager import WikiManager, clear_hooks
+
+    cfg = _cfg(tmp_path)
+    fake_vectors = MagicMock()
+    fake_vectors.collection_info = MagicMock(return_value={"name": "x"})
+    fake_vectors.delete_by_filter = MagicMock(return_value=1)
+
+    clear_hooks()
+    wm = WikiManager(cfg)
+    KnowledgeBase(cfg, wiki=wm, vectors=fake_vectors)
+
+    wm.create_page("Doomed", "body", category="general", tags=["t"])
+    assert wm.delete_page("Doomed") is True
+
+    # The post_delete hook fired; vectors.delete_by_filter was called with
+    # the page's identity.
+    assert fake_vectors.delete_by_filter.called
+    args, _ = fake_vectors.delete_by_filter.call_args
+    assert args[0] == {"category": "general", "slug": "doomed"}
+    clear_hooks()

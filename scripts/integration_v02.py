@@ -154,17 +154,33 @@ def main() -> int:
     check("Chat memory persists to disk", len(msgs2) == 3 and msgs2[0].content == "Hello")
 
     # KB-backed mode: writes route through KnowledgeBase → vector index
-    # stays in sync with search_long_term().
+    # stays in sync. Use a UUID sentinel so we can't accidentally satisfy
+    # the assertion via stale state, and clear the relevant Qdrant points
+    # first. The assertion specifically requires a VECTOR hit (not just
+    # a wiki keyword hit) to prove the routing.
+    import uuid as _uuid
+
     from rke.wiki.knowledge_base import KnowledgeBase  # noqa: E402
+    sentinel = f"sentinel{_uuid.uuid4().hex[:12]}"
     kb_for_chat = KnowledgeBase(cfg)
+    # Drop any prior chunks for this thread slug so we know any vector hit
+    # came from THIS run's writes.
+    try:
+        kb_for_chat.vectors.delete_by_filter({"slug": "kb-thread-int"})
+    except Exception:
+        pass
     cm_kb = ChatMemory(thread_id="kb-thread-int", kb=kb_for_chat,
                        buffer_size=3, summarize_threshold=5)
-    cm_kb.add_user_message("Discuss FoobarUniqueXyzzy in this conversation")
-    cm_kb.add_assistant_message("Yes, FoobarUniqueXyzzy is configured")
-    time.sleep(0.3)
-    long_term = cm_kb.search_long_term("FoobarUniqueXyzzy", limit=3)
-    check("KB-backed chat content reachable via search_long_term", bool(long_term),
-          f"got {len(long_term)} hits")
+    cm_kb.add_user_message(f"Discuss {sentinel} in this conversation")
+    cm_kb.add_assistant_message(f"Yes, {sentinel} is configured")
+    time.sleep(0.5)
+    long_term = cm_kb.search_long_term(sentinel, limit=5)
+    vector_hits = [h for h in long_term if h.source == "vector"]
+    check(
+        "KB-backed ChatMemory routes to vector index (vector hit present)",
+        bool(vector_hits),
+        f"got {len(long_term)} total hits, {len(vector_hits)} vector hits",
+    )
 
     # Vector search still works (not regressed)
     print("\n--- Regression check: vector search ---")
