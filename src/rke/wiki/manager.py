@@ -139,6 +139,10 @@ class WikiManager:
                 path=path,
                 created_at=existing.created_at or now,
                 updated_at=now,
+                # Preserve lifecycle frontmatter across updates so a normal
+                # body edit does not silently disable TTL/LRU bookkeeping.
+                expires_at=existing.expires_at,
+                last_accessed_at=existing.last_accessed_at,
             )
         else:
             page = WikiPage(
@@ -182,7 +186,9 @@ class WikiManager:
             page.path.unlink()
             for hook in list(_post_delete_hooks):
                 try:
-                    hook(page.slug)
+                    # Pass the full page so consumers (e.g. search_index) can
+                    # disambiguate same-slug-different-category entries.
+                    hook(page)
                 except Exception as exc:
                     log.warning("post_delete hook %r failed: %s", hook, exc)
             return True
@@ -198,10 +204,18 @@ class WikiManager:
         """
         if _query_backend is not None:
             try:
-                slugs = _query_backend(query, limit)
+                ids = _query_backend(query, limit)
                 pages: list[WikiPage] = []
-                for slug in slugs:
-                    p = self.get_page(slug)
+                for ident in ids:
+                    # Backends may return either "slug" or "category/slug"
+                    # composite identifiers. Composite form lets us look up
+                    # the exact page when the same slug exists in multiple
+                    # categories (e.g. chat-thread archive pages).
+                    if "/" in ident:
+                        category, slug = ident.rsplit("/", 1)
+                    else:
+                        category, slug = None, ident
+                    p = self.get_page(slug, category=category)
                     if p:
                         pages.append(p)
                 if pages:

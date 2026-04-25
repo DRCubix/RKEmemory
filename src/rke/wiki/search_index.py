@@ -4,6 +4,12 @@ Drop-in accelerator for :func:`rke.wiki.manager.WikiManager.query_wiki`.
 Maintains a BM25F-scored index of WikiPages on disk and wires into the
 WikiManager hook system so add/delete stay in sync.
 
+The schema's unique key is the composite ``(category, slug)`` path, so two
+pages with identical slugs in different categories — e.g. multiple chat
+thread archives all named ``archive-1`` — coexist correctly. The
+``search()`` method therefore returns ``"category/slug"`` composite
+identifiers; ``WikiManager.query_wiki`` knows how to split those.
+
 Usage::
 
     from rke.wiki.manager import WikiManager
@@ -32,11 +38,26 @@ from .manager import WikiManager, WikiPage
 log = logging.getLogger(__name__)
 
 
+def _path(category: str, slug: str) -> str:
+    """Composite '(category, slug)' identity used as the unique index key
+    AND as the wire format returned by :meth:`WhooshIndex.search`."""
+    return f"{category}/{slug}"
+
+
 def _build_schema() -> Schema:
-    """Schema with title/tags boosted so matches there outrank body-only hits."""
+    """Schema with title/tags boosted so matches there outrank body-only hits.
+
+    The ``path`` field is the composite uniqueness key — duplicate slugs
+    across different categories are kept apart correctly. ``slug`` and
+    ``category`` remain individually queryable for diagnostics."""
     stem = StemmingAnalyzer()
     return Schema(
-        slug=ID(stored=True, unique=True),
+        path=ID(stored=True, unique=True),
+        # `slug` and `category` are also indexed (not just stored) so that
+        # delete_by_term("slug", ...) — the legacy fallback when a caller
+        # only knows the slug — still finds matching documents.
+        slug=ID(stored=True),
+        category=ID(stored=True),
         title=TEXT(stored=True, analyzer=stem, field_boost=5.0),
         tags=KEYWORD(stored=True, commas=True, lowercase=True, scorable=True,
                      field_boost=2.0),
@@ -59,11 +80,13 @@ class WhooshIndex:
 
     # ── CRUD ─────────────────────────────────────────────────────
     def add(self, page: WikiPage) -> None:
-        """Index or replace a page (slug is the unique key)."""
+        """Index or replace a page. Identity is (category, slug)."""
         writer = self._ix.writer()
         try:
             writer.update_document(
+                path=_path(page.category, page.slug),
                 slug=str(page.slug),
+                category=str(page.category),
                 title=str(page.title or ""),
                 tags=",".join(str(t) for t in (page.tags or [])),
                 body=str(page.body or ""),
@@ -73,11 +96,22 @@ class WhooshIndex:
             writer.cancel()
             raise
 
-    def remove(self, slug: str) -> None:
-        """Delete the document with the given slug, if present."""
+    def remove(self, page_or_slug: WikiPage | str) -> None:
+        """Delete the document for ``page_or_slug``.
+
+        Preferred: pass a :class:`WikiPage` so we can target the exact
+        ``(category, slug)``. If a bare slug is given (legacy callers,
+        or code paths that lost the page object before delete), every
+        matching document across all categories is removed — the safe
+        fallback when the caller cannot disambiguate."""
         writer = self._ix.writer()
         try:
-            writer.delete_by_term("slug", str(slug))
+            if isinstance(page_or_slug, WikiPage):
+                writer.delete_by_term(
+                    "path", _path(page_or_slug.category, page_or_slug.slug),
+                )
+            else:
+                writer.delete_by_term("slug", str(page_or_slug))
             writer.commit()
         except Exception:
             writer.cancel()
@@ -85,7 +119,11 @@ class WhooshIndex:
 
     # ── Query ────────────────────────────────────────────────────
     def search(self, query: str, limit: int = 5) -> list[str]:
-        """Return ranked slugs (best first) for the given query string."""
+        """Return ranked composite identifiers (``"category/slug"``).
+
+        Returning the composite identifier — rather than the bare slug —
+        lets ``WikiManager.query_wiki`` disambiguate same-slug-different-
+        category pages."""
         q = (query or "").strip()
         if not q:
             return []
@@ -99,7 +137,7 @@ class WhooshIndex:
             return []
         with self._ix.searcher(weighting=BM25F()) as searcher:
             results = searcher.search(parsed, limit=limit)
-            return [hit["slug"] for hit in results if "slug" in hit]
+            return [hit["path"] for hit in results if "path" in hit]
 
     # ── Rebuild ──────────────────────────────────────────────────
     def rebuild(self, pages: Iterable[WikiPage]) -> int:
@@ -111,7 +149,9 @@ class WhooshIndex:
         try:
             for page in pages:
                 writer.add_document(
+                    path=_path(page.category, page.slug),
                     slug=str(page.slug),
+                    category=str(page.category),
                     title=str(page.title or ""),
                     tags=",".join(str(t) for t in (page.tags or [])),
                     body=str(page.body or ""),

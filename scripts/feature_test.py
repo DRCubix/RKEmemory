@@ -195,7 +195,7 @@ def main() -> int:
     # ── 11. CLI smoke ────────────────────────────────────────────
     section("11. CLI (subprocess smoke for each command)")
     env_vars = {**os.environ}
-    cli = ["python", "-m", "rke"]
+    cli = [sys.executable, "-m", "rke"]
     for args, expect_in_stdout in [
         (["version"], f"rke {__version__}"),
         (["--help"], "Recursive Knowledge Engine"),
