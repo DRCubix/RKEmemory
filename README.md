@@ -16,12 +16,14 @@
   <em>Agents never see full context. They explore knowledge programmatically.</em>
 </p>
 
-> ⚠️ **Status: Work in Progress (alpha, v0.1.0).** The core scaffolding —
-> CLI, config, wiki manager, vector store, graph store, ingestion pipelines,
-> RLM router (with deterministic fallback), and agent integration — is
-> implemented and unit-tested. End-to-end production validation against
-> Qdrant + FalkorDB + BGE-M3 is ongoing. **Expect breaking changes** until
-> v1.0. Feedback and PRs welcome.
+> ⚠️ **Status: alpha, v0.2.0** ([release notes](https://github.com/DRCubix/RKEmemory/releases/tag/v0.2.0)).
+> The core (CLI, config, wiki manager, vector store, graph store, RLM
+> router, ingestion pipelines, agent integration) plus five v0.2 memory
+> primitives — Whoosh inverted index, LLM entity extraction, lifecycle/TTL,
+> bi-temporal graph, and a LangChain-compatible chat memory adapter — are
+> implemented, unit-tested, and validated end-to-end against live Qdrant
+> + FalkorDB. **Expect breaking changes** until v1.0. Feedback and PRs
+> welcome.
 
 ---
 
@@ -149,12 +151,20 @@ Every query runs in parallel across three layers:
 - **Graph search** — Entity relationships extracted via Cypher
 Results are synthesized into a single context block for the agent.
 
-### 7. **Production-Tested on Real Infrastructure**
-RKE runs on bare-metal Ubuntu with:
-- 82 wiki pages, 541 vector chunks, 59 graph nodes
-- Qdrant (v1.17+), FalkorDB, BGE-M3 (1024-dim embeddings)
-- Sub-second search across the entire knowledge base
-- Docker Compose or bare-metal deployment
+### 7. **Measured, Reproducible Performance**
+On a 200-doc synthetic corpus (CPU only, MiniLM-L6-v2 384d) the
+shipped `scripts/benchmark.py` reports:
+
+| Metric | Value |
+|---|---|
+| Embedding throughput | **104 docs/sec** |
+| End-to-end ingestion | **25 pages/sec** |
+| Vector search p50 / p95 | **9.9 / 12.8 ms** |
+| Cypher 1-hop p50 (FalkorDB) | **0.2 ms** |
+| Recall@1 / Recall@5 | **100% / 100%** |
+
+With the v0.2 Whoosh inverted index, combined `wiki + vector + graph`
+query p95 drops from ~200ms (v0.1 linear scan) to ~10–20ms.
 
 ### 8. **Open-Source Stack, Zero Vendor Lock-In**
 Every component is open-source and self-hostable:
@@ -162,6 +172,20 @@ Every component is open-source and self-hostable:
 - **FalkorDB** — Knowledge graph (Server Side Public License)
 - **BGE-M3** — Embedding model (MIT)
 - **RKE itself** — MIT License
+
+## What's New in v0.2
+
+Five additional memory primitives, each opt-in and tenant-scoped:
+
+| Module | What it does |
+|---|---|
+| `rke.wiki.search_index` | **Whoosh BM25F inverted index** for `query_wiki()`. Composite `(category, slug)` keys keep same-slug pages from different categories distinct. Optional `[search]` extra. |
+| `rke.knowledge.extractor` | **Auto-extracts entities and relations** from new wiki pages and writes them to FalkorDB. Three backends: `regex` (offline default), `anthropic`, `openai` (`[llm]` extra). |
+| `rke.wiki.lifecycle` | **TTL / LRU eviction** — `set_expiry`, `touch`, `expired_pages`, `evict_expired`, `lru_candidates`, `evict_lru`, `AccessTracker`. Pages without lifecycle metadata stay immortal. |
+| `rke.graph_temporal` | **Bi-temporal graph layer** — `TemporalRelation` carries `valid_from / valid_to / recorded_at`; `query_at(t)` injects the temporal predicate; `history()`, `invalidate(at)`, `fact_changes_between()` ship. Composes over `GraphStore` (no subclassing). |
+| `rke.adapters.chat_memory` | **LangChain-compatible chat history**, persisted as wiki threads with `summarize_and_archive()` rollover. Routes through `KnowledgeBase` so `search_long_term()` finds embedded conversation content. |
+
+Hardened through 11 rounds of automated Codex review (30+ blockers caught and fixed; see [CHANGELOG.md](CHANGELOG.md)).
 
 ## Quick Start
 
@@ -269,6 +293,59 @@ context = gather_context("Build the auth module")
 prompt = format_context_for_agent(context, "claude")  # or "codex", "gemini"
 ```
 
+### v0.2 features
+
+```python
+# ── Whoosh inverted index ── (`pip install -e ".[search]"`) ───
+from rke.wiki.manager import WikiManager
+from rke.wiki.search_index import WhooshIndex
+wm = WikiManager()
+WhooshIndex.attach(wm, index_dir="data/.wiki_index")
+wm.query_wiki("oauth refresh tokens")  # now BM25F-ranked
+
+# ── LLM entity extraction ── (`pip install -e ".[llm]"` for LLM backends) ─
+from rke.knowledge.extractor import EntityExtractor, attach_to_wiki
+from rke.graph_store import GraphStore
+graph = GraphStore()
+# Tenant-scoped: only this wm's pages feed `graph`. Regex backend is
+# offline; provider="anthropic"|"openai" needs the [llm] extra + creds.
+attach_to_wiki(graph, wiki=wm, extractor=EntityExtractor(provider="regex"))
+wm.create_page("RKE Stack", "RKE uses Qdrant. Qdrant depends on Rocksdb.")
+# → graph now has Project(RKE) -[USES]-> API(Qdrant) -[DEPENDS_ON]-> API(Rocksdb)
+
+# ── Lifecycle / TTL / LRU ─────────────────────────────────────
+from rke.wiki.lifecycle import set_expiry, evict_expired, AccessTracker
+set_expiry(wm, "old-experiment", days=30)            # expire in 30 days
+evicted = evict_expired(wm)                          # delete past-due
+with AccessTracker(wm):                              # auto-touch on read
+    page = wm.get_page("oauth-patterns")             # last_accessed_at updated
+
+# ── Bi-temporal graph ─────────────────────────────────────────
+from rke.graph_temporal import TemporalGraphStore, TemporalRelation
+from datetime import datetime, timezone
+tgs = TemporalGraphStore(graph)
+tgs.add_relation(TemporalRelation(
+    "Project", "RKE", "USES", "API", "Qdrant",
+    valid_from=datetime(2025, 1, 1, tzinfo=timezone.utc),
+))
+rows = tgs.query_at(
+    "MATCH (p:Project)-[r:USES]->(a:API) RETURN a.name",
+    t=datetime(2025, 6, 1, tzinfo=timezone.utc),
+)
+
+# ── Chat memory adapter (LangChain-style) ─────────────────────
+from rke.adapters.chat_memory import ChatMemory
+from rke.wiki.knowledge_base import KnowledgeBase
+kb = KnowledgeBase()
+mem = ChatMemory(thread_id="user-42", kb=kb,
+                 buffer_size=20, summarize_threshold=50)
+mem.add_user_message("How do refresh tokens work?")
+mem.add_assistant_message("They rotate when users switch accounts.")
+mem.history()                  # last N messages, chronological
+mem.to_prompt_string()         # rendered for LLM injection
+mem.search_long_term("refresh tokens")   # KB-routed, vector-backed
+```
+
 ## Ingestion Pipeline
 
 ```bash
@@ -342,28 +419,40 @@ RKEmemory/
 │   ├── __init__.py              # Package version
 │   ├── __main__.py              # Entry point
 │   ├── cli.py                   # CLI orchestrator (rke command)
-│   ├── config.py                # Configuration (env + YAML)
-│   ├── vector_store.py          # Qdrant + BGE-M3 embeddings
+│   ├── config.py                # Configuration (defaults < YAML < env)
+│   ├── vector_store.py          # Qdrant + sentence-transformers
 │   ├── graph_store.py           # FalkorDB knowledge graph
+│   ├── graph_temporal.py        # ★ v0.2 — bi-temporal facade
 │   ├── agent_integration.py     # Agent context injection
 │   ├── rlm/
 │   │   ├── router.py            # RLM Router (peek/grep/partition)
 │   │   └── environment.py       # REPL environment for agents
 │   ├── wiki/
-│   │   ├── manager.py           # Wiki CRUD + ingest + query + lint
-│   │   └── knowledge_base.py    # LlamaIndex RAG integration
+│   │   ├── manager.py           # Wiki CRUD + extension hooks
+│   │   ├── knowledge_base.py    # Wiki + vector chunked indexer
+│   │   ├── search_index.py      # ★ v0.2 — Whoosh BM25F accelerator
+│   │   └── lifecycle.py         # ★ v0.2 — TTL / LRU / AccessTracker
+│   ├── knowledge/
+│   │   └── extractor.py         # ★ v0.2 — entity / relation extractor
+│   ├── adapters/
+│   │   └── chat_memory.py       # ★ v0.2 — LangChain-compat chat adapter
 │   └── ingestion/
-│       ├── knowledge.py         # Parallel domain ingestion
-│       ├── drive.py             # Google Drive ingestion
+│       ├── knowledge.py         # Parallel local ingestion
+│       ├── drive.py             # Google Drive ingestion ([drive])
 │       └── git_repos.py         # Git repo scanning
 ├── config/
 │   ├── rke.yaml.example         # Main config template
 │   └── sources.yaml.example     # Knowledge sources template
 ├── scripts/
 │   ├── setup.sh                 # One-line setup (venv + dirs + config)
-│   └── start-services.sh        # Start Qdrant + FalkorDB
-├── docker-compose.yml           # Docker services
-├── pyproject.toml               # Python package definition
+│   ├── start-services.sh        # Start Qdrant + FalkorDB
+│   ├── feature_test.py          # ★ 52-stage v0.1 feature smoke
+│   ├── integration_v02.py       # ★ 18-stage v0.2 live integration
+│   └── benchmark.py             # ★ latency / throughput / recall@K
+├── tests/                       # 84 unit tests across 8 files
+├── .github/workflows/ci.yml     # pytest 3.10/3.11/3.12 + ruff
+├── docker-compose.yml           # Qdrant + FalkorDB
+├── pyproject.toml               # extras: [search] [llm] [drive] [llamaindex] [dev]
 └── README.md                    # This file
 ```
 
@@ -372,7 +461,17 @@ RKEmemory/
 - **Python 3.10+**
 - **Docker & Docker Compose** (for services) — or install Qdrant/FalkorDB manually
 - **NVIDIA GPU** (optional, for GPU-accelerated embeddings)
-- **50GB+ disk space** (for BGE-M3 model + vector data)
+- **~3 GB disk space** (BGE-M3 default model; ~100 MB if you swap to MiniLM-L6 via `RKE_EMBEDDING_MODEL`)
+
+### Optional dependency extras
+
+```bash
+pip install -e ".[search]"      # Whoosh inverted index for query_wiki()
+pip install -e ".[llm]"         # anthropic + openai for LLM extraction / RLM
+pip install -e ".[drive]"       # Google Drive ingestion
+pip install -e ".[llamaindex]"  # LlamaIndex integration
+pip install -e ".[dev]"         # pytest + ruff + mypy + benchmark deps
+```
 
 ## License
 
