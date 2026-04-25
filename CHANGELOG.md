@@ -6,6 +6,93 @@ All notable changes will be documented here. This project follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-25
+
+Five new memory-system primitives, built by a parallel sub-agent fleet
+and hardened through 11 rounds of automated Codex audit (30+ blockers
+caught and fixed).
+
+### Added — five v0.2 features
+
+- **`rke.wiki.search_index`** (optional `[search]` extra) — Whoosh-backed
+  inverted index that accelerates `WikiManager.query_wiki()` from a
+  ~200ms p95 linear scan to BM25F lookup. Composite `(category, slug)`
+  uniqueness key keeps same-slug-different-category pages distinct.
+  Tenant-aware via `WhooshIndex.attach(wm, ...)`.
+
+- **`rke.knowledge.extractor`** — pluggable entity / relation extractor
+  with three backends: `regex` (offline default, zero deps), `anthropic`
+  (Claude), `openai`. `attach_to_wiki(graph, wiki=wm)` registers a
+  tenant-scoped post-create hook that auto-feeds the FalkorDB graph;
+  failures never propagate out of page creation. Optional deps via the
+  new `[llm]` extra.
+
+- **`rke.wiki.lifecycle`** — Letta-style memory pressure / TTL layer:
+  `set_expiry`, `touch`, `is_expired`, `expired_pages`, `evict_expired`,
+  `lru_candidates`, `evict_lru`, `AccessTracker` (no-recursion installer).
+  All API points accept a `category=` argument to disambiguate same-slug
+  pages.
+
+- **`rke.graph_temporal`** — Zep-style bi-temporal facade over
+  `GraphStore`. `TemporalRelation` carries `valid_from / valid_to /
+  recorded_at`; `query_at(t)` injects the temporal predicate;
+  `invalidate(at)` is idempotent; `history()` and
+  `fact_changes_between()` ship.
+
+- **`rke.adapters.chat_memory`** — LangChain-`ConversationBufferMemory`-
+  compatible adapter persisting each thread as a wiki page, with
+  metadata-preserving line format, summarize/archive rollover, and
+  KB-routed writes so `search_long_term()` stays in sync with the
+  vector index.
+
+### Added — supporting infrastructure
+
+- Extension hooks in `WikiManager`: `register_post_create`,
+  `register_post_delete`, `set_query_backend`, `clear_hooks`.
+  `WikiPage` gained optional `expires_at` and `last_accessed_at`
+  frontmatter fields.
+- `KnowledgeBase` now registers a tenant-scoped `post_delete` hook that
+  drops the page's vector chunks from Qdrant on delete or eviction.
+- `VectorStore.delete_by_filter(match, min_chunk_index=...)` evicts
+  stale chunks left over from longer past revisions.
+- `pyproject.toml` extras: `[search]` (whoosh), `[llm]` (anthropic +
+  openai), `[dev]` updated to include whoosh + psutil.
+- New scripts: `scripts/integration_v02.py` (18-stage live integration
+  smoke against Qdrant + FalkorDB), `scripts/feature_test.py`
+  (52-stage v0.1 regression suite), `scripts/benchmark.py` (latency,
+  throughput, recall@K). All three auto-isolate to per-run /tmp scratch
+  namespaces respecting both `RKE_*` and `RKE_*__*` env-var aliases —
+  safe to run on a developer machine without clobbering real data.
+
+### Fixed (caught by Codex audit)
+
+This release was hardened through 11 rounds of automated review. Notable
+fixes the unit tests had not surfaced:
+- AccessTracker recursion that triggered ~1000 file rewrites per single
+  read (Python's recursion-limit error was being swallowed).
+- `created_at` timestamp corruption when a page was edited (lifecycle
+  rewrites went through `create_page(overwrite=True)`).
+- `qdrant-client` 1.10+ API (`query_points` replaces deprecated
+  `search`, `CollectionInfo.vectors_count` removed).
+- `sentence-transformers` ≥3.0 method rename
+  (`get_sentence_embedding_dimension` → `get_embedding_dimension`).
+- Whoosh slug collision across categories (composite key fix).
+- Bound-method identity vs equality (`is` vs `==`) in detach paths.
+- ChatMemory metadata persistence round-trip.
+- Hook accumulation on repeated attach (now idempotent across all
+  feature modules).
+- KB cross-tenant vector deletion (now scoped to wiki root).
+- Validation scripts wiping user data (now auto-isolate to /tmp).
+
+### Known limitations (v0.3 roadmap)
+
+- **Concurrent multi-tenant in a single Python process** — extractor
+  and search_index installations are scoped to one (graph, wm) pair at
+  a time via module-global state. Side-by-side tenants in the SAME
+  process work for KnowledgeBase but not for extractor or
+  search_index. For most deployments (one process per tenant) this is
+  irrelevant. A registry-per-tenant redesign is on the v0.3 list.
+
 ## [0.1.1] - 2026-04-24
 
 End-to-end validation against live Qdrant + FalkorDB completed. Two real
