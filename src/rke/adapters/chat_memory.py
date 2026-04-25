@@ -201,13 +201,21 @@ class ChatMemory:
             f"## Summary\n\n{summary}\n\n"
             f"## Raw messages ({len(archived)})\n\n{raw_body}"
         )
-        self.wiki.create_page(
-            archive_title,
-            archive_body,
-            category=self._archive_category,
-            tags=["thread-archive", self.slug],
-            overwrite=True,
-        )
+        if self.kb is not None:
+            self.kb.add_page(
+                title=archive_title,
+                body=archive_body,
+                category=self._archive_category,
+                tags=["thread-archive", self.slug],
+            )
+        else:
+            self.wiki.create_page(
+                archive_title,
+                archive_body,
+                category=self._archive_category,
+                tags=["thread-archive", self.slug],
+                overwrite=True,
+            )
 
         # Prepend the summary as a system message and drop the archived raws.
         summary_msg = Message(
@@ -240,13 +248,24 @@ class ChatMemory:
 
     def _persist(self) -> None:
         body = _render_messages(self._buffer) if self._buffer else ""
-        self.wiki.create_page(
-            self._page_title(),
-            body,
-            category=self._category,
-            tags=["thread", self.slug],
-            overwrite=True,
-        )
+        # When a KnowledgeBase is wired in, route through its add_page so
+        # the vector index stays in sync (search_long_term() relies on it).
+        # Without a KB, fall back to a plain wiki write.
+        if self.kb is not None:
+            self.kb.add_page(
+                title=self._page_title(),
+                body=body,
+                category=self._category,
+                tags=["thread", self.slug],
+            )
+        else:
+            self.wiki.create_page(
+                self._page_title(),
+                body,
+                category=self._category,
+                tags=["thread", self.slug],
+                overwrite=True,
+            )
 
     def _next_archive_n(self) -> int:
         existing = self.wiki.list_pages(category=self._archive_category)

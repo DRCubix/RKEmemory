@@ -75,10 +75,13 @@ def set_expiry(
     *,
     days: int | None = None,
     at: datetime | None = None,
+    category: str | None = None,
 ) -> WikiPage | None:
     """Set (or clear) the ``expires_at`` frontmatter on an existing page.
 
-    Pass exactly one of ``days`` or ``at``.  Returns the re-saved page, or
+    Pass exactly one of ``days`` or ``at``. ``category`` disambiguates
+    when the same slug exists in multiple categories — without it the
+    first match found via rglob is used. Returns the re-saved page, or
     ``None`` if the slug is unknown.
     """
     if days is not None and at is not None:
@@ -86,7 +89,7 @@ def set_expiry(
     if days is None and at is None:
         raise ValueError("must pass days or at")
 
-    page = wm.get_page(slug)
+    page = wm.get_page(slug, category=category)
     if page is None:
         return None
 
@@ -99,9 +102,18 @@ def set_expiry(
     return _rewrite(wm, page)
 
 
-def touch(wm: WikiManager, slug: str) -> WikiPage | None:
-    """Update ``last_accessed_at`` to now and re-save.  Returns the page."""
-    page = wm.get_page(slug)
+def touch(
+    wm: WikiManager,
+    slug: str,
+    *,
+    category: str | None = None,
+) -> WikiPage | None:
+    """Update ``last_accessed_at`` to now and re-save. Returns the page.
+
+    ``category`` disambiguates when the same slug exists in multiple
+    categories. Without it, the first match found via rglob is used.
+    """
+    page = wm.get_page(slug, category=category)
     if page is None:
         return None
     page.last_accessed_at = now_iso()

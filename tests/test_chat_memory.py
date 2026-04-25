@@ -257,3 +257,24 @@ def test_message_render_includes_nonempty_metadata():
     rendered = m.render()
     assert rendered.startswith('### 2024-01-01T00:00:00+00:00 user {"k":"v"}\n')
     assert rendered.endswith("\nhi\n")
+
+
+def test_kb_routes_writes_through_knowledge_base(tmp_path: Path):
+    """Regression: when kb is provided, ChatMemory writes must go through
+    kb.add_page so the vector index stays in sync with search_long_term."""
+    cfg = _cfg(tmp_path)
+    fake_kb = MagicMock()
+    fake_kb.config = cfg
+    fake_kb.wiki = MagicMock()
+    fake_kb.wiki.list_pages = MagicMock(return_value=[])
+    fake_kb.wiki.get_page = MagicMock(return_value=None)
+
+    mem = ChatMemory(thread_id="kb-routed", kb=fake_kb)
+    mem.add_user_message("first")
+    mem.add_assistant_message("second")
+
+    # Each add must have invoked kb.add_page (vector indexing path).
+    assert fake_kb.add_page.call_count >= 2, (
+        f"expected kb.add_page to be called for each persist, "
+        f"got {fake_kb.add_page.call_count} calls"
+    )

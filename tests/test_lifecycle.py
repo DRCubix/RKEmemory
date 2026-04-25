@@ -212,3 +212,35 @@ def test_access_tracker_install_uninstall(tmp_path: Path):
     after = wm.get_page("tracked")
     assert after is not None
     assert after.last_accessed_at == ""
+
+
+def test_set_expiry_with_category_disambiguates(tmp_path: Path):
+    """Regression: same slug in two categories → set_expiry must hit the
+    caller-selected one, not whichever rglob finds first."""
+    wm = _wm(tmp_path)
+    wm.create_page("Item", "alpha body", category="cat-x", tags=["t"])
+    wm.create_page("Item", "beta body",  category="cat-y", tags=["t"])
+
+    past = datetime.now(timezone.utc) - timedelta(hours=1)
+    p = set_expiry(wm, "item", at=past, category="cat-y")
+    assert p is not None and p.category == "cat-y"
+
+    # Re-read both files: only cat-y has expires_at set.
+    page_x = wm.get_page("item", category="cat-x")
+    page_y = wm.get_page("item", category="cat-y")
+    assert page_x is not None and page_x.expires_at == ""
+    assert page_y is not None and page_y.expires_at != ""
+
+
+def test_touch_with_category_disambiguates(tmp_path: Path):
+    wm = _wm(tmp_path)
+    wm.create_page("Note", "body 1", category="cat-a", tags=["t"])
+    wm.create_page("Note", "body 2", category="cat-b", tags=["t"])
+
+    p = touch(wm, "note", category="cat-b")
+    assert p is not None and p.category == "cat-b"
+
+    page_a = wm.get_page("note", category="cat-a")
+    page_b = wm.get_page("note", category="cat-b")
+    assert page_a is not None and page_a.last_accessed_at == ""
+    assert page_b is not None and page_b.last_accessed_at != ""
