@@ -9,9 +9,11 @@ Run: PYTHONPATH=src python scripts/bench_search_backends.py
 
 from __future__ import annotations
 
+import math
 import os
 import shutil
 import statistics
+import sys
 import tempfile
 import time
 import uuid as _uuid_mod
@@ -21,8 +23,26 @@ from pathlib import Path
 os.environ.setdefault("RKE_WIKI_PATH", f"/tmp/rke_search_bench_{_uuid_mod.uuid4().hex[:6]}")
 
 from rke.wiki.manager import WikiPage  # noqa: E402
-from rke.wiki.search_index import WhooshIndex  # noqa: E402
-from rke.wiki.tantivy_index import TantivyIndex  # noqa: E402
+
+try:
+    from rke.wiki.search_index import WhooshIndex  # noqa: E402
+except ImportError as exc:
+    print(
+        f"ERROR: missing whoosh ({exc}). Install with:\n"
+        '  pip install -e ".[search]"',
+        file=sys.stderr,
+    )
+    raise SystemExit(2) from exc
+
+try:
+    from rke.wiki.tantivy_index import TantivyIndex  # noqa: E402
+except ImportError as exc:
+    print(
+        f"ERROR: missing tantivy ({exc}). Install with:\n"
+        '  pip install -e ".[search-tantivy]"',
+        file=sys.stderr,
+    )
+    raise SystemExit(2) from exc
 
 TOPICS = {
     "auth":  "OAuth refresh tokens are rotated when users switch accounts. Bearer tokens authenticate.",
@@ -67,10 +87,12 @@ def make_corpus(n_per_topic: int = 20) -> list[WikiPage]:
 
 
 def percentile(data: list[float], pct: float) -> float:
+    """Nearest-rank percentile per the standard convention. For 300 samples
+    p95 returns the 285th sorted value (index 284), not the 286th."""
     if not data:
         return 0.0
     s = sorted(data)
-    k = int(len(s) * pct / 100)
+    k = max(0, math.ceil(len(s) * pct / 100) - 1)
     return s[min(k, len(s) - 1)]
 
 

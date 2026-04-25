@@ -18,8 +18,10 @@ All notable changes will be documented here. This project follows
 - **`scripts/bench_search_backends.py`** — head-to-head Whoosh vs
   Tantivy benchmark, no external services needed.
 - **New optional extra `[search-tantivy]`** in `pyproject.toml`.
-- 11 new tests in `tests/test_tantivy_index.py` mirroring the Whoosh
-  test suite (auto-skipped if `tantivy` isn't installed).
+- 13 new tests in `tests/test_tantivy_index.py` (11 mirroring the Whoosh
+  test suite + 2 regression tests for Codex-found issues: hyphenated-tag
+  parity and schema-version sentinel). Auto-skipped if `tantivy` isn't
+  installed.
 
 ### Changed
 - CI workflow installs `tantivy` and runs `test_tantivy_index.py`.

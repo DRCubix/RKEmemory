@@ -468,9 +468,9 @@ RKEmemory/
 ### Optional dependency extras
 
 ```bash
-pip install -e ".[search]"          # Whoosh BM25F (pure Python)
+pip install -e ".[search]"          # Whoosh inverted index for query_wiki()
 pip install -e ".[search-tantivy]"  # Tantivy BM25F (Rust, ~20× faster)
-pip install -e ".[llm]"             # anthropic + openai for extraction / RLM
+pip install -e ".[llm]"             # anthropic + openai for LLM extraction / RLM
 pip install -e ".[drive]"           # Google Drive ingestion
 pip install -e ".[llamaindex]"      # LlamaIndex integration
 pip install -e ".[dev]"             # pytest + ruff + mypy + benchmark deps
