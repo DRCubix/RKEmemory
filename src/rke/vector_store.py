@@ -58,7 +58,10 @@ class VectorStore:
             device = ecfg.get("device", "cpu")
             log.info("loading embedding model %s on %s", model_name, device)
             self._embedder = SentenceTransformer(model_name, device=device)
-            self._dim = self._embedder.get_sentence_embedding_dimension()
+            # sentence-transformers >=3.0 renamed this method.
+            getter = getattr(self._embedder, "get_embedding_dimension", None) \
+                or self._embedder.get_sentence_embedding_dimension
+            self._dim = getter()
         return self._embedder
 
     @property
@@ -89,12 +92,16 @@ class VectorStore:
     def collection_info(self) -> dict[str, Any]:
         try:
             info = self.client.get_collection(self._collection)
-            return {
+            out: dict[str, Any] = {
                 "name": self._collection,
-                "points_count": info.points_count,
-                "vectors_count": info.vectors_count,
-                "status": str(info.status),
+                "points_count": getattr(info, "points_count", None),
+                "status": str(getattr(info, "status", "")),
             }
+            # vectors_count was removed in newer qdrant-client; tolerate both
+            vc = getattr(info, "vectors_count", None)
+            if vc is not None:
+                out["vectors_count"] = vc
+            return out
         except Exception as exc:
             return {"name": self._collection, "error": str(exc)}
 
@@ -145,12 +152,23 @@ class VectorStore:
         """Pure semantic search."""
         self.ensure_collection()
         qvec = self.embed([query])[0]
-        hits = self.client.search(
-            collection_name=self._collection,
-            query_vector=qvec,
-            limit=limit,
-        )
-        return [self._to_result(h) for h in hits]
+        # qdrant-client 1.10+ deprecated .search() in favor of .query_points().
+        # Use query_points() if available, fall back to legacy search().
+        if hasattr(self.client, "query_points"):
+            resp = self.client.query_points(
+                collection_name=self._collection,
+                query=qvec,
+                limit=limit,
+                with_payload=True,
+            )
+            points = getattr(resp, "points", resp)
+        else:
+            points = self.client.search(  # type: ignore[attr-defined]
+                collection_name=self._collection,
+                query_vector=qvec,
+                limit=limit,
+            )
+        return [self._to_result(h) for h in points]
 
     def hybrid_search(
         self,
