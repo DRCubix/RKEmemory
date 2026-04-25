@@ -189,3 +189,29 @@ def test_detach_clears_query_backend(tmp_path: Path):
     assert wm_mod._query_backend is not None
     TantivyIndex.detach()
     assert wm_mod._query_backend is None
+
+
+def test_tag_with_hyphen_stays_whole(tmp_path):
+    """Regression: Codex caught that the `default` tokenizer split tags
+    like 'thread-archive' on the hyphen, breaking Whoosh parity. Per-tag
+    raw tokenization keeps the literal value searchable."""
+    idx = TantivyIndex(tmp_path / "idx")
+    idx.add(_page("a", "A", "alpha", tags=["thread-archive"]))
+    idx.add(_page("b", "B", "beta", tags=["other-tag"]))
+
+    # Search the literal hyphenated tag → exact match on raw-tokenized field.
+    paths = idx.search("thread-archive", limit=5)
+    assert paths == ["general/a"]
+
+
+def test_schema_version_mismatch_raises(tmp_path):
+    """Regression: opening an existing index with a stale schema version
+    must raise so the operator deletes-and-rebuilds, not silently degrade."""
+    idx_dir = tmp_path / "idx"
+    TantivyIndex(idx_dir)  # creates meta.json + .rke_schema_version
+    version_path = idx_dir / ".rke_schema_version"
+    assert version_path.exists()
+    # Simulate an old-schema index by overwriting the version sentinel.
+    version_path.write_text("v1-old-schema")
+    with pytest.raises(RuntimeError, match="incompatible schema"):
+        TantivyIndex(idx_dir)

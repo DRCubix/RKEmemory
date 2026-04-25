@@ -45,22 +45,42 @@ def _path(category: str, slug: str) -> str:
     return f"{category}/{slug}"
 
 
+# Bump whenever _build_schema() changes. Persisted next to the index so we
+# detect (and refuse to open) stale-but-valid Tantivy directories built by
+# a previous schema variant.
+_SCHEMA_VERSION = "v2-en_stem-raw_tags"
+
+
 def _build_schema() -> tantivy.Schema:
     """Schema mirroring search_index.WhooshIndex: composite path is the
-    unique key; slug + category are individually queryable; title/tags/body
-    are tokenized for full-text BM25F search."""
+    unique key; slug + category are individually queryable; title/body
+    use English stemming (Whoosh StemmingAnalyzer parity); tags use the
+    `raw` tokenizer with one term per tag, mirroring Whoosh's
+    KEYWORD(commas=True, lowercase=True) semantics — values like
+    'thread-archive' stay as a single token instead of splitting on '-'."""
     sb = tantivy.SchemaBuilder()
     # ID-like fields use the "raw" tokenizer so 'general/oauth-tokens' stays
     # as a single token instead of being split on '/' or '-'.
     sb.add_text_field("path", stored=True, tokenizer_name="raw")
     sb.add_text_field("slug", stored=True, tokenizer_name="raw")
     sb.add_text_field("category", stored=True, tokenizer_name="raw")
-    # Tokenized text for ranked search. "default" is Tantivy's standard
-    # English-friendly analyser.
-    sb.add_text_field("title", stored=True, tokenizer_name="default")
-    sb.add_text_field("tags", stored=True, tokenizer_name="default")
-    sb.add_text_field("body", stored=False, tokenizer_name="default")
+    # Stemmed text fields match Whoosh's StemmingAnalyzer semantics.
+    sb.add_text_field("title", stored=True, tokenizer_name="en_stem")
+    # Per-tag indexing under the raw tokenizer: each tag is added as its
+    # own value via repeated doc.add_text("tags", tag) and stays whole.
+    sb.add_text_field("tags", stored=True, tokenizer_name="raw")
+    sb.add_text_field("body", stored=False, tokenizer_name="en_stem")
     return sb.build()
+
+
+def _add_tags(doc: tantivy.Document, tags) -> None:
+    """Index each tag as its own raw-tokenized value (one term per tag).
+    Mirrors Whoosh KEYWORD(commas=True, lowercase=True) precisely:
+    'thread-archive' stays whole, lowercase normalisation applied."""
+    for tag in (tags or []):
+        s = str(tag).strip().lower()
+        if s:
+            doc.add_text("tags", s)
 
 
 class TantivyIndex:
@@ -72,12 +92,31 @@ class TantivyIndex:
         self.index_dir = Path(index_dir)
         self.index_dir.mkdir(parents=True, exist_ok=True)
         self._schema = _build_schema()
-        # tantivy.Index opens an existing index if metadata is present in
-        # the directory; otherwise creates a new one with this schema.
-        try:
+        # Tantivy persists its metadata as `meta.json` in the index dir.
+        # We use that AND a per-RKE schema-version sentinel: an existing
+        # tantivy index built with the old schema would still pass the
+        # meta.json check, but its tags would be tokenised with the
+        # default analyser instead of `raw`, silently degrading recall.
+        # Refusing to open a mismatched-version directory makes the
+        # incompatibility loud rather than silent.
+        meta_path = self.index_dir / "meta.json"
+        version_path = self.index_dir / ".rke_schema_version"
+        if meta_path.exists():
+            existing_version = (
+                version_path.read_text().strip()
+                if version_path.exists() else ""
+            )
+            if existing_version != _SCHEMA_VERSION:
+                raise RuntimeError(
+                    f"Tantivy index at {self.index_dir} was built with an "
+                    f"incompatible schema (got {existing_version!r}, "
+                    f"expected {_SCHEMA_VERSION!r}). "
+                    "Delete the directory and rebuild from the wiki."
+                )
             self._ix = tantivy.Index.open(str(self.index_dir))
-        except Exception:
+        else:
             self._ix = tantivy.Index(self._schema, path=str(self.index_dir))
+            version_path.write_text(_SCHEMA_VERSION)
         # Optional tenant root — set by attach() to filter foreign pages.
         self._tenant_root: Path | None = None
 
@@ -107,7 +146,7 @@ class TantivyIndex:
             doc.add_text("slug", str(page.slug))
             doc.add_text("category", str(page.category))
             doc.add_text("title", str(page.title or ""))
-            doc.add_text("tags", " ".join(str(t) for t in (page.tags or [])))
+            _add_tags(doc, page.tags)
             doc.add_text("body", str(page.body or ""))
             writer.add_document(doc)
             writer.commit()
@@ -180,7 +219,7 @@ class TantivyIndex:
                 doc.add_text("slug", str(page.slug))
                 doc.add_text("category", str(page.category))
                 doc.add_text("title", str(page.title or ""))
-                doc.add_text("tags", " ".join(str(t) for t in (page.tags or [])))
+                _add_tags(doc, page.tags)
                 doc.add_text("body", str(page.body or ""))
                 writer.add_document(doc)
                 count += 1
