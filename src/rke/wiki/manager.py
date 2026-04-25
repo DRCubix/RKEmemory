@@ -34,9 +34,12 @@ class WikiPage:
     path: Path | None = None
     created_at: str = ""
     updated_at: str = ""
+    # Optional lifecycle fields (used by rke.wiki.lifecycle). Empty string = unset.
+    expires_at: str = ""
+    last_accessed_at: str = ""
 
     def to_markdown(self) -> str:
-        meta = {
+        meta: dict[str, Any] = {
             "title": self.title,
             "category": self.category,
             "tags": list(self.tags),
@@ -44,7 +47,51 @@ class WikiPage:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
+        if self.expires_at:
+            meta["expires_at"] = self.expires_at
+        if self.last_accessed_at:
+            meta["last_accessed_at"] = self.last_accessed_at
         return f"---\n{yaml.safe_dump(meta, sort_keys=False).strip()}\n---\n\n{self.body.lstrip()}\n"
+
+
+# ── Extension hooks ────────────────────────────────────────────
+# Modules can register callbacks that fire after create/delete. Used by:
+#   rke.wiki.search_index  — keep an inverted index in sync
+#   rke.wiki.lifecycle     — touch last_accessed_at, evict on TTL
+#   rke.knowledge.extractor — pull entities/relations from new pages
+_post_create_hooks: list = []
+_post_delete_hooks: list = []
+
+
+def register_post_create(fn) -> None:
+    """Register a callable invoked as fn(page: WikiPage) after each create_page."""
+    if fn not in _post_create_hooks:
+        _post_create_hooks.append(fn)
+
+
+def register_post_delete(fn) -> None:
+    """Register a callable invoked as fn(slug: str) after each delete_page."""
+    if fn not in _post_delete_hooks:
+        _post_delete_hooks.append(fn)
+
+
+def clear_hooks() -> None:
+    """Test helper: drop all registered hooks."""
+    _post_create_hooks.clear()
+    _post_delete_hooks.clear()
+    global _query_backend
+    _query_backend = None
+
+
+# Optional pluggable accelerator for query_wiki(). A backend is a callable
+# (query: str, limit: int) -> list[str] returning matching slugs, ranked.
+_query_backend = None
+
+
+def set_query_backend(fn) -> None:
+    """Install a query accelerator (e.g. a Whoosh index)."""
+    global _query_backend
+    _query_backend = fn
 
 
 @dataclass
@@ -106,6 +153,11 @@ class WikiManager:
             )
         path.write_text(page.to_markdown(), encoding="utf-8")
         log.info("wiki: wrote %s", path)
+        for hook in list(_post_create_hooks):
+            try:
+                hook(page)
+            except Exception as exc:
+                log.warning("post_create hook %r failed: %s", hook, exc)
         return page
 
     def get_page(self, slug_or_title: str, category: str | None = None) -> WikiPage | None:
@@ -128,12 +180,35 @@ class WikiManager:
         page = self.get_page(slug_or_title, category)
         if page and page.path and page.path.exists():
             page.path.unlink()
+            for hook in list(_post_delete_hooks):
+                try:
+                    hook(page.slug)
+                except Exception as exc:
+                    log.warning("post_delete hook %r failed: %s", hook, exc)
             return True
         return False
 
     # ── Search / query ───────────────────────────────────────────
     def query_wiki(self, query: str, limit: int = 5) -> list[WikiPage]:
-        """Keyword scan across page titles, tags, and bodies (lowercased substring)."""
+        """Keyword search.
+
+        If `rke.wiki.search_index` has been imported and registered an
+        accelerator via `set_query_backend`, use it; otherwise fall back to
+        the deterministic linear substring scan.
+        """
+        if _query_backend is not None:
+            try:
+                slugs = _query_backend(query, limit)
+                pages: list[WikiPage] = []
+                for slug in slugs:
+                    p = self.get_page(slug)
+                    if p:
+                        pages.append(p)
+                if pages:
+                    return pages
+            except Exception as exc:
+                log.warning("query_backend failed (%s); using linear scan", exc)
+
         q = query.lower()
         scored: list[tuple[int, WikiPage]] = []
         for page in self.list_pages():
@@ -213,4 +288,6 @@ class WikiManager:
             path=path,
             created_at=meta.get("created_at", ""),
             updated_at=meta.get("updated_at", ""),
+            expires_at=meta.get("expires_at", ""),
+            last_accessed_at=meta.get("last_accessed_at", ""),
         )
