@@ -1,1 +1,84 @@
-File unchanged since last read. The content from the earlier read_file result in this conversation is still current — refer to that instead of re-reading.
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rke"
+version = "0.1.0"
+description = "RKE — Recursive Knowledge Engine: multi-agent memory with RLM routing, LLM-Wiki, Qdrant vectors, and FalkorDB graph"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+    { name = "CubixAI" }
+]
+keywords = ["llm", "rag", "knowledge-graph", "vector-search", "agents", "memory"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "typer>=0.12.0",
+    "rich>=13.0.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0.0",
+    "qdrant-client>=1.9.0",
+    "sentence-transformers>=3.0.0",
+    "falkordb>=1.0.0",
+    "requests>=2.31.0",
+    "markdown-it-py>=3.0.0",
+    "pydantic>=2.0.0",
+    "numpy>=1.26.0",
+]
+
+[project.optional-dependencies]
+drive = [
+    "google-api-python-client>=2.100.0",
+    "google-auth-httplib2>=0.2.0",
+    "google-auth-oauthlib>=1.2.0",
+]
+llamaindex = [
+    "llama-index>=0.11.0",
+    "llama-index-vector-stores-qdrant>=0.3.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.5.0",
+    "mypy>=1.10.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/DRCubix/RKEmemory"
+Repository = "https://github.com/DRCubix/RKEmemory"
+Issues = "https://github.com/DRCubix/RKEmemory/issues"
+
+[project.scripts]
+rke = "rke.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["rke*"]
+
+[tool.setuptools.package-data]
+rke = ["py.typed"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra -q"
