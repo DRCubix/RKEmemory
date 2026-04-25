@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rke"
-version = "0.2.0"
+version = "0.2.1"
 description = "RKE — Recursive Knowledge Engine: multi-agent memory with RLM routing, LLM-Wiki, Qdrant vectors, and FalkorDB graph"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -61,10 +61,17 @@ dev = [
     "ruff>=0.5.0",
     "mypy>=1.10.0",
     "whoosh>=2.7.4",   # needed for test_search_index.py (also exposed via [search])
+    "tantivy>=0.22.0", # needed for test_tantivy_index.py (also exposed via [search-tantivy])
     "psutil>=5.9.0",   # used by scripts/benchmark.py for RSS sampling
 ]
 search = [
     "whoosh>=2.7.4",
+]
+search-tantivy = [
+    # Rust-backed BM25F. Drop-in alternative to the Whoosh backend
+    # via rke.wiki.tantivy_index.TantivyIndex; ~5–10× faster on the
+    # same corpora.
+    "tantivy>=0.22.0",
 ]
 
 [project.urls]

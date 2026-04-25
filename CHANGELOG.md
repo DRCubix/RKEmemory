@@ -6,6 +6,24 @@ All notable changes will be documented here. This project follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-04-25
+
+### Added
+- **`rke.wiki.tantivy_index`** — Tantivy-backed BM25F search accelerator
+  with the same public API as `WhooshIndex`. Two backends now ship in
+  parallel; pick by import. Measured **17–21× faster query latency** vs
+  Whoosh on a 200-doc corpus (0.05 ms p50 vs 0.88 ms; 0.06 ms p95 vs
+  1.34 ms). Build is slower for small corpora (~6× — fixed JIT cost),
+  inverts at scale.
+- **`scripts/bench_search_backends.py`** — head-to-head Whoosh vs
+  Tantivy benchmark, no external services needed.
+- **New optional extra `[search-tantivy]`** in `pyproject.toml`.
+- 11 new tests in `tests/test_tantivy_index.py` mirroring the Whoosh
+  test suite (auto-skipped if `tantivy` isn't installed).
+
+### Changed
+- CI workflow installs `tantivy` and runs `test_tantivy_index.py`.
+
 ## [0.2.0] - 2026-04-25
 
 Five new memory-system primitives, built by a parallel sub-agent fleet

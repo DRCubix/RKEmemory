@@ -180,6 +180,7 @@ Five additional memory primitives, each opt-in and tenant-scoped:
 | Module | What it does |
 |---|---|
 | `rke.wiki.search_index` | **Whoosh BM25F inverted index** for `query_wiki()`. Composite `(category, slug)` keys keep same-slug pages from different categories distinct. Optional `[search]` extra. |
+| `rke.wiki.tantivy_index` | **Tantivy (Rust) BM25F backend** — drop-in alternative with the same API. Measured **17–21× faster** than Whoosh on query latency (0.05 ms p50 vs 0.88 ms on a 200-doc corpus). Install via `[search-tantivy]`. |
 | `rke.knowledge.extractor` | **Auto-extracts entities and relations** from new wiki pages and writes them to FalkorDB. Three backends: `regex` (offline default), `anthropic`, `openai` (`[llm]` extra). |
 | `rke.wiki.lifecycle` | **TTL / LRU eviction** — `set_expiry`, `touch`, `expired_pages`, `evict_expired`, `lru_candidates`, `evict_lru`, `AccessTracker`. Pages without lifecycle metadata stay immortal. |
 | `rke.graph_temporal` | **Bi-temporal graph layer** — `TemporalRelation` carries `valid_from / valid_to / recorded_at`; `query_at(t)` injects the temporal predicate; `history()`, `invalidate(at)`, `fact_changes_between()` ship. Composes over `GraphStore` (no subclassing). |
@@ -431,6 +432,7 @@ RKEmemory/
 │   │   ├── manager.py           # Wiki CRUD + extension hooks
 │   │   ├── knowledge_base.py    # Wiki + vector chunked indexer
 │   │   ├── search_index.py      # ★ v0.2 — Whoosh BM25F accelerator
+│   │   ├── tantivy_index.py     # ★ v0.2.1 — Tantivy BM25F (Rust, ~20× faster)
 │   │   └── lifecycle.py         # ★ v0.2 — TTL / LRU / AccessTracker
 │   ├── knowledge/
 │   │   └── extractor.py         # ★ v0.2 — entity / relation extractor
@@ -466,11 +468,12 @@ RKEmemory/
 ### Optional dependency extras
 
 ```bash
-pip install -e ".[search]"      # Whoosh inverted index for query_wiki()
-pip install -e ".[llm]"         # anthropic + openai for LLM extraction / RLM
-pip install -e ".[drive]"       # Google Drive ingestion
-pip install -e ".[llamaindex]"  # LlamaIndex integration
-pip install -e ".[dev]"         # pytest + ruff + mypy + benchmark deps
+pip install -e ".[search]"          # Whoosh BM25F (pure Python)
+pip install -e ".[search-tantivy]"  # Tantivy BM25F (Rust, ~20× faster)
+pip install -e ".[llm]"             # anthropic + openai for extraction / RLM
+pip install -e ".[drive]"           # Google Drive ingestion
+pip install -e ".[llamaindex]"      # LlamaIndex integration
+pip install -e ".[dev]"             # pytest + ruff + mypy + benchmark deps
 ```
 
 ## License
