@@ -48,25 +48,22 @@ def _parse(ts: str) -> datetime | None:
 
 
 def _rewrite(wm: WikiManager, page: WikiPage) -> WikiPage:
-    """Re-save ``page`` preserving all metadata (including lifecycle fields).
-
-    ``wm.create_page`` handles title/body/category/tags but doesn't accept
-    expires_at or last_accessed_at.  We therefore let create_page do its
-    thing, then splice the lifecycle fields back onto the fresh page and
-    rewrite the file using ``WikiPage.to_markdown()``.
-    """
-    fresh = wm.create_page(
-        title=page.title,
-        body=page.body,
-        category=page.category,
-        tags=list(page.tags),
-        overwrite=True,
-    )
-    fresh.expires_at = page.expires_at
-    fresh.last_accessed_at = page.last_accessed_at
-    if fresh.path is not None:
-        fresh.path.write_text(fresh.to_markdown(), encoding="utf-8")
-    return fresh
+    """Re-save ``page`` preserving ALL metadata (including created_at and
+    lifecycle fields). Writes directly via ``WikiPage.to_markdown()`` rather
+    than routing through ``wm.create_page(overwrite=True)`` because the
+    latter resets ``created_at`` and re-fires post_create hooks on every
+    lifecycle change."""
+    if page.path is None:
+        # Page was never persisted — fall back to create_page to give it a path.
+        return wm.create_page(
+            title=page.title,
+            body=page.body,
+            category=page.category,
+            tags=list(page.tags),
+        )
+    page.updated_at = now_iso()
+    page.path.write_text(page.to_markdown(), encoding="utf-8")
+    return page
 
 
 # ── public API ──────────────────────────────────────────────────────────
@@ -199,13 +196,17 @@ class AccessTracker:
         original = self.wm.get_page
         setattr(self.wm, self._ATTR, original)
 
-        wm = self.wm
-
         def wrapper(slug_or_title: str, category: str | None = None):
             page = original(slug_or_title, category)
-            if page is not None:
+            if page is not None and page.path is not None:
                 try:
-                    touch(wm, page.slug)
+                    # Inlined touch — must NOT re-enter wm.get_page, otherwise
+                    # the wrapper would recurse indefinitely (each access would
+                    # trigger another access). Update in-place and write the
+                    # file directly.
+                    page.last_accessed_at = now_iso()
+                    page.updated_at = now_iso()
+                    page.path.write_text(page.to_markdown(), encoding="utf-8")
                 except Exception:
                     # Never let lifecycle bookkeeping break reads.
                     pass

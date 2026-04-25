@@ -22,7 +22,6 @@ from unittest.mock import MagicMock
 from rke.config import load_config
 from rke.graph_store import GraphStore
 from rke.vector_store import VectorStore
-from rke.wiki.knowledge_base import KnowledgeBase
 from rke.wiki.manager import WikiManager, clear_hooks
 
 PASSED: list[str] = []
@@ -52,7 +51,7 @@ def main() -> int:
     idx_dir = Path("/tmp/rke_int_idx")
     if idx_dir.exists():
         shutil.rmtree(idx_dir)
-    idx = WhooshIndex.attach(wm, idx_dir)
+    WhooshIndex.attach(wm, idx_dir)
 
     # ── Feature 2: LLM extractor (regex backend) attached ──────
     print("--- 2. Extractor (regex backend) attached ---")

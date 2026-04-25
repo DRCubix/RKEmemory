@@ -27,7 +27,7 @@ from whoosh.qparser import MultifieldParser, OrGroup
 from whoosh.scoring import BM25F
 
 from . import manager as wiki_manager
-from .manager import WikiManager, WikiPage, clear_hooks
+from .manager import WikiManager, WikiPage
 
 log = logging.getLogger(__name__)
 
@@ -143,11 +143,23 @@ class WhooshIndex:
 
     @classmethod
     def detach(cls) -> None:
-        """Unwire any previously-attached index (clears all registered hooks)."""
-        clear_hooks()
-        if cls._attached is not None:
-            try:
-                cls._attached._ix.close()
-            except Exception:
-                pass
-            cls._attached = None
+        """Unwire ONLY this index's hooks. Other plugins (extractor,
+        lifecycle, ...) keep their registrations intact."""
+        if cls._attached is None:
+            return
+        idx = cls._attached
+        try:
+            wiki_manager._post_create_hooks.remove(idx.add)
+        except (ValueError, AttributeError):
+            pass
+        try:
+            wiki_manager._post_delete_hooks.remove(idx.remove)
+        except (ValueError, AttributeError):
+            pass
+        if wiki_manager._query_backend is idx.search:
+            wiki_manager.set_query_backend(None)
+        try:
+            idx._ix.close()
+        except Exception:
+            pass
+        cls._attached = None
