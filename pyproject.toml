@@ -54,6 +54,9 @@ dev = [
     "ruff>=0.5.0",
     "mypy>=1.10.0",
 ]
+search = [
+    "whoosh>=2.7.4",
+]
 
 [project.urls]
 Homepage = "https://github.com/DRCubix/RKEmemory"
