@@ -156,7 +156,10 @@ class WhooshIndex:
             wiki_manager._post_delete_hooks.remove(idx.remove)
         except (ValueError, AttributeError):
             pass
-        if wiki_manager._query_backend is idx.search:
+        # NB: bound methods need == not `is` — `idx.search is idx.search`
+        # returns False because each attribute access produces a fresh bound
+        # method object, while __eq__ compares (self, function) identity.
+        if wiki_manager._query_backend == idx.search:
             wiki_manager.set_query_backend(None)
         try:
             idx._ix.close()

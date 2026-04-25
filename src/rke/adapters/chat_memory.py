@@ -17,6 +17,7 @@ No dependency on langchain — this re-implements the subset we care about.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -28,9 +29,11 @@ from ..wiki.knowledge_base import CombinedHit, KnowledgeBase
 from ..wiki.manager import WikiManager, slugify
 
 _VALID_ROLES = {"user", "assistant", "system"}
-# Matches a block header: "### 2024-01-01T00:00:00+00:00 user"
+# Matches a block header: "### 2024-01-01T00:00:00+00:00 user [optional JSON]".
+# The trailing JSON is the message's metadata; absent for empty metadata.
 _BLOCK_RE = re.compile(
-    r"^###\s+(?P<ts>\S+)\s+(?P<role>user|assistant|system)\s*$",
+    r"^###\s+(?P<ts>\S+)\s+(?P<role>user|assistant|system)"
+    r"(?:\s+(?P<meta>\{.*\}))?\s*$",
     re.MULTILINE,
 )
 
@@ -47,7 +50,18 @@ class Message:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def render(self) -> str:
-        """Render as a single ``### ts role`` block."""
+        """Render as a single ``### ts role [json-metadata]`` block.
+
+        Metadata is appended to the header as a single-line JSON object iff
+        non-empty, so reload round-trips it. Empty metadata produces the
+        bare ``### ts role`` form for cleaner output.
+        """
+        if self.metadata:
+            try:
+                meta_json = json.dumps(self.metadata, separators=(",", ":"), default=str)
+                return f"### {self.timestamp} {self.role} {meta_json}\n{self.content}\n"
+            except (TypeError, ValueError):
+                pass  # fall through to no-metadata form
         return f"### {self.timestamp} {self.role}\n{self.content}\n"
 
 
@@ -67,10 +81,20 @@ def _parse_messages(body: str) -> list[Message]:
         start = m.end()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
         content = body[start:end].strip("\n")
+        meta_str = m.group("meta")
+        meta: dict[str, Any] = {}
+        if meta_str:
+            try:
+                parsed = json.loads(meta_str)
+                if isinstance(parsed, dict):
+                    meta = parsed
+            except (json.JSONDecodeError, TypeError):
+                meta = {}
         out.append(Message(
             role=m.group("role"),
             content=content,
             timestamp=m.group("ts"),
+            metadata=meta,
         ))
     return out
 

@@ -229,3 +229,31 @@ def test_default_summarizer_truncates():
     out = _default_summarizer(msgs)
     assert len(out) <= 2000
     assert out.startswith("[Summary of 50 messages")
+
+
+def test_metadata_persists_across_reload(tmp_path: Path):
+    """Regression: Codex caught that metadata was dropped on reload."""
+    cfg = _cfg(tmp_path)
+    mem = ChatMemory(thread_id="meta-thread", config=cfg)
+    mem.add_user_message("hi", source="cli", trace_id="abc-123")
+    mem.add_assistant_message("hello", model="sonnet-4-6", tokens=42)
+
+    # Fresh instance reading the same thread off disk.
+    reloaded = ChatMemory(thread_id="meta-thread", config=cfg)
+    msgs = reloaded.history()
+    assert len(msgs) == 2
+    assert msgs[0].metadata == {"source": "cli", "trace_id": "abc-123"}
+    assert msgs[1].metadata == {"model": "sonnet-4-6", "tokens": 42}
+
+
+def test_message_render_omits_empty_metadata():
+    m = Message(role="user", content="hi", timestamp="2024-01-01T00:00:00+00:00")
+    assert m.render() == "### 2024-01-01T00:00:00+00:00 user\nhi\n"
+
+
+def test_message_render_includes_nonempty_metadata():
+    m = Message(role="user", content="hi", timestamp="2024-01-01T00:00:00+00:00",
+                metadata={"k": "v"})
+    rendered = m.render()
+    assert rendered.startswith('### 2024-01-01T00:00:00+00:00 user {"k":"v"}\n')
+    assert rendered.endswith("\nhi\n")
