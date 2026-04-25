@@ -16,6 +16,13 @@
   <em>Agents never see full context. They explore knowledge programmatically.</em>
 </p>
 
+> ⚠️ **Status: Work in Progress (alpha, v0.1.0).** The core scaffolding —
+> CLI, config, wiki manager, vector store, graph store, ingestion pipelines,
+> RLM router (with deterministic fallback), and agent integration — is
+> implemented and unit-tested. End-to-end production validation against
+> Qdrant + FalkorDB + BGE-M3 is ongoing. **Expect breaking changes** until
+> v1.0. Feedback and PRs welcome.
+
 ---
 
 ## What Is RKE?
@@ -161,7 +168,7 @@ Every component is open-source and self-hostable:
 ### Option 1: Docker (Recommended)
 
 ```bash
-git clone https://github.com/DrCubix/RKEmemory.git
+git clone https://github.com/DRCubix/RKEmemory.git
 cd RKEmemory
 
 # One-line setup
@@ -177,7 +184,7 @@ rke status
 ### Option 2: Bare-Metal
 
 ```bash
-git clone https://github.com/DrCubix/RKEmemory.git
+git clone https://github.com/DRCubix/RKEmemory.git
 cd RKEmemory
 
 # Setup

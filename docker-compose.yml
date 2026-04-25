@@ -1,1 +1,27 @@
-File unchanged since last read. The content from the earlier read_file result in this conversation is still current — refer to that instead of re-reading.
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.17.4
+    container_name: rke-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"   # HTTP
+      - "6334:6334"   # gRPC
+    volumes:
+      - ./storage/qdrant:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: 6333
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__LOG_LEVEL: INFO
+
+  falkordb:
+    image: falkordb/falkordb:latest
+    container_name: rke-falkordb
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./storage/falkordb:/var/lib/falkordb/data
+    command: ["--protected-mode", "no"]
+
+# Volumes are bind-mounted into ./storage/ which is gitignored.
+# Override host paths with COMPOSE_PROJECT_NAME or .env if needed.

@@ -5,7 +5,7 @@ Thank you for your interest in contributing to the Recursive Knowledge Engine!
 ## Development Setup
 
 ```bash
-git clone https://github.com/DrCubix/RKEmemory.git
+git clone https://github.com/DRCubix/RKEmemory.git
 cd RKEmemory
 bash scripts/setup.sh
 source .venv/bin/activate

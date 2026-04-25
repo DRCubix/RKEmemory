@@ -1,1 +1,58 @@
-File unchanged since last read. The content from the earlier read_file result in this conversation is still current — refer to that instead of re-reading.
+# RKE main configuration template.
+# Copy to config/rke.yaml and customize. config/rke.yaml is gitignored.
+# Any RKE_* environment variable overrides the value at the same key.
+
+wiki:
+  path: data/wiki
+
+qdrant:
+  host: localhost
+  port: 6333
+  grpc_port: 6334
+  collection: rke_main
+  # api_key: ""   # only for Qdrant Cloud
+
+falkordb:
+  host: localhost
+  port: 6379
+  graph: rke
+  # password: ""
+
+embedding:
+  # Default to BGE-M3 (1024-dim). For a smaller/faster default, use:
+  #   sentence-transformers/all-MiniLM-L6-v2  (384-dim)
+  model: BAAI/bge-m3
+  model_path: models/BAAI/bge-m3
+  device: cpu             # cuda:0 / cuda / cpu / mps
+  dimensions: 1024
+  batch_size: 32
+
+rlm:
+  max_depth: 5
+  max_iterations: 20
+  max_cost_usd: 1.00
+  timeout_seconds: 300
+  # provider/model are read from env (RKE_LLM_PROVIDER, RKE_LLM_MODEL)
+
+ingestion:
+  parallel_workers: 4
+  chunk_size: 1024
+  chunk_overlap: 128
+  include_globs:
+    - "**/*.md"
+    - "**/*.txt"
+    - "**/*.py"
+    - "**/*.ts"
+    - "**/*.tsx"
+    - "**/*.js"
+  exclude_globs:
+    - "**/node_modules/**"
+    - "**/.venv/**"
+    - "**/venv/**"
+    - "**/.git/**"
+    - "**/__pycache__/**"
+    - "**/dist/**"
+    - "**/build/**"
+
+logging:
+  level: INFO
