@@ -17,9 +17,20 @@ from pathlib import Path
 # Set BEFORE importing rke so load_config picks scratch paths up.
 # Caller can still override by setting the env vars themselves.
 _run_id = _uuid_mod.uuid4().hex[:8]
-os.environ.setdefault("RKE_WIKI_PATH", f"/tmp/rke_feature_{_run_id}_wiki")
-os.environ.setdefault("RKE_QDRANT_COLLECTION", f"rke_feature_{_run_id}")
-os.environ.setdefault("RKE_FALKORDB_GRAPH", f"rke_feature_{_run_id}")
+
+
+def _set_if_neither(scratch_value: str, *names: str) -> None:
+    """Set the FIRST name only if NONE of the equivalent env var aliases
+    (single- or double-underscore) is already present. Preserves any
+    user override exactly."""
+    if any(n in os.environ for n in names):
+        return
+    os.environ[names[0]] = scratch_value
+
+
+_set_if_neither(f"/tmp/rke_feature_{_run_id}_wiki", "RKE_WIKI_PATH", "RKE_WIKI__PATH")
+_set_if_neither(f"rke_feature_{_run_id}", "RKE_QDRANT_COLLECTION", "RKE_QDRANT__COLLECTION")
+_set_if_neither(f"rke_feature_{_run_id}", "RKE_FALKORDB_GRAPH", "RKE_FALKORDB__GRAPH")
 
 from rke import __version__  # noqa: E402
 from rke.agent_integration import format_context_for_agent, gather_context  # noqa: E402

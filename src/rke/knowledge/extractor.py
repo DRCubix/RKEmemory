@@ -273,9 +273,16 @@ _attached_hook = None
 def attach_to_wiki(
     graph: GraphStore,
     *,
+    wiki=None,
     extractor: EntityExtractor | None = None,
 ) -> None:
     """Register a post_create wiki hook that auto-feeds the graph.
+
+    If ``wiki`` (a WikiManager) is provided, the hook is TENANT-SCOPED:
+    it only fires for pages whose path lives under wiki.root, so two
+    WikiManagers in the same process can each have their own extractor
+    without cross-contamination. If ``wiki`` is omitted, the hook fires
+    globally — backwards-compatible behaviour for single-tenant uses.
 
     Idempotent: repeated calls detach the previous hook first, so callers
     never accumulate duplicate writes. Any failure (extractor error, graph
@@ -288,8 +295,23 @@ def attach_to_wiki(
     detach_from_wiki()
 
     ex = extractor or EntityExtractor()
+    tenant_root = None
+    if wiki is not None and getattr(wiki, "root", None) is not None:
+        try:
+            tenant_root = wiki.root.resolve()
+        except Exception:
+            tenant_root = None
 
     def _hook(page: WikiPage) -> None:
+        # Tenant guard: skip pages from other WikiManager instances.
+        if tenant_root is not None:
+            try:
+                if page.path is None:
+                    return
+                if not page.path.resolve().is_relative_to(tenant_root):
+                    return
+            except Exception:
+                return
         try:
             entities, relations = ex.extract(f"{page.title}\n\n{page.body}")
             _write_to_graph(graph, page, entities, relations)

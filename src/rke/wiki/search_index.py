@@ -77,10 +77,30 @@ class WhooshIndex:
             self._ix = whoosh_index.open_dir(str(self.index_dir))
         else:
             self._ix = whoosh_index.create_in(str(self.index_dir), _build_schema())
+        # When set (via .attach), the global post_create / post_delete hooks
+        # ignore pages from other WikiManager tenants.
+        self._tenant_root: Path | None = None
+
+    def _belongs_to_tenant(self, page: WikiPage) -> bool:
+        """Return True iff the page's file lives under this index's
+        configured tenant root, OR if no tenant was configured (legacy)."""
+        if self._tenant_root is None:
+            return True
+        if getattr(page, "path", None) is None:
+            return False
+        try:
+            return page.path.resolve().is_relative_to(self._tenant_root)
+        except Exception:
+            return False
 
     # ── CRUD ─────────────────────────────────────────────────────
     def add(self, page: WikiPage) -> None:
-        """Index or replace a page. Identity is (category, slug)."""
+        """Index or replace a page. Identity is (category, slug).
+
+        When the index has been attached to a tenant via :meth:`attach`,
+        this no-ops for pages from other WikiManager tenants."""
+        if not self._belongs_to_tenant(page):
+            return
         writer = self._ix.writer()
         try:
             writer.update_document(
@@ -103,7 +123,12 @@ class WhooshIndex:
         ``(category, slug)``. If a bare slug is given (legacy callers,
         or code paths that lost the page object before delete), every
         matching document across all categories is removed — the safe
-        fallback when the caller cannot disambiguate."""
+        fallback when the caller cannot disambiguate.
+
+        Tenant-scoped when called with a WikiPage and an attached tenant
+        root: foreign pages are silently skipped."""
+        if isinstance(page_or_slug, WikiPage) and not self._belongs_to_tenant(page_or_slug):
+            return
         writer = self._ix.writer()
         try:
             if isinstance(page_or_slug, WikiPage):
@@ -177,6 +202,10 @@ class WhooshIndex:
             cls.detach()
 
         idx = cls(index_dir)
+        try:
+            idx._tenant_root = wm.root.resolve()
+        except Exception:
+            idx._tenant_root = wm.root
         idx.rebuild(wm.list_pages())
 
         wiki_manager.register_post_create(idx.add)

@@ -27,9 +27,20 @@ from unittest.mock import MagicMock
 # scratch values BEFORE importing rke modules so load_config picks them
 # up. Caller can still override by setting the env vars first.
 _run_id = _uuid_mod.uuid4().hex[:8]
-os.environ.setdefault("RKE_WIKI_PATH", f"/tmp/rke_int_{_run_id}_wiki")
-os.environ.setdefault("RKE_QDRANT_COLLECTION", f"rke_int_{_run_id}")
-os.environ.setdefault("RKE_FALKORDB_GRAPH", f"rke_int_{_run_id}")
+
+
+def _set_if_neither(scratch_value: str, *names: str) -> None:
+    """Set the FIRST name to scratch_value only if NONE of the equivalent
+    forms (single- or double-underscore env var aliases) is already set
+    by the caller. Preserves any pre-existing override exactly."""
+    if any(n in os.environ for n in names):
+        return
+    os.environ[names[0]] = scratch_value
+
+
+_set_if_neither(f"/tmp/rke_int_{_run_id}_wiki", "RKE_WIKI_PATH", "RKE_WIKI__PATH")
+_set_if_neither(f"rke_int_{_run_id}", "RKE_QDRANT_COLLECTION", "RKE_QDRANT__COLLECTION")
+_set_if_neither(f"rke_int_{_run_id}", "RKE_FALKORDB_GRAPH", "RKE_FALKORDB__GRAPH")
 
 from rke.config import load_config  # noqa: E402
 from rke.graph_store import GraphStore  # noqa: E402
