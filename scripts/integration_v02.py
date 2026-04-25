@@ -12,17 +12,29 @@ Requires live Qdrant + FalkorDB at the configured ports.
 
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 import time
+import uuid as _uuid_mod
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from rke.config import load_config
-from rke.graph_store import GraphStore
-from rke.vector_store import VectorStore
-from rke.wiki.manager import WikiManager, clear_hooks
+# ── Safety: auto-isolate to a /tmp scratch namespace ──────────────
+# Without this, running the script with default config would wipe the
+# user's real wiki/qdrant/falkordb data. We set RKE_* env vars to
+# scratch values BEFORE importing rke modules so load_config picks them
+# up. Caller can still override by setting the env vars first.
+_run_id = _uuid_mod.uuid4().hex[:8]
+os.environ.setdefault("RKE_WIKI_PATH", f"/tmp/rke_int_{_run_id}_wiki")
+os.environ.setdefault("RKE_QDRANT_COLLECTION", f"rke_int_{_run_id}")
+os.environ.setdefault("RKE_FALKORDB_GRAPH", f"rke_int_{_run_id}")
+
+from rke.config import load_config  # noqa: E402
+from rke.graph_store import GraphStore  # noqa: E402
+from rke.vector_store import VectorStore  # noqa: E402
+from rke.wiki.manager import WikiManager, clear_hooks  # noqa: E402
 
 PASSED: list[str] = []
 FAILED: list[tuple[str, str]] = []

@@ -10,19 +10,28 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid as _uuid_mod
 from pathlib import Path
 
-from rke import __version__
-from rke.agent_integration import format_context_for_agent, gather_context
-from rke.config import DEFAULTS, _coerce, _deep_merge, load_config
-from rke.graph_store import Entity, GraphStore, Relation
-from rke.ingestion.git_repos import list_repos
-from rke.ingestion.knowledge import iter_files
-from rke.rlm.environment import Environment, make_environment
-from rke.rlm.router import RLMRouter
-from rke.vector_store import VectorStore
-from rke.wiki.knowledge_base import KnowledgeBase, chunk_text
-from rke.wiki.manager import WikiManager, slugify
+# ── Safety: auto-isolate to a /tmp scratch namespace ──────────────
+# Set BEFORE importing rke so load_config picks scratch paths up.
+# Caller can still override by setting the env vars themselves.
+_run_id = _uuid_mod.uuid4().hex[:8]
+os.environ.setdefault("RKE_WIKI_PATH", f"/tmp/rke_feature_{_run_id}_wiki")
+os.environ.setdefault("RKE_QDRANT_COLLECTION", f"rke_feature_{_run_id}")
+os.environ.setdefault("RKE_FALKORDB_GRAPH", f"rke_feature_{_run_id}")
+
+from rke import __version__  # noqa: E402
+from rke.agent_integration import format_context_for_agent, gather_context  # noqa: E402
+from rke.config import DEFAULTS, _coerce, _deep_merge, load_config  # noqa: E402
+from rke.graph_store import Entity, GraphStore, Relation  # noqa: E402
+from rke.ingestion.git_repos import list_repos  # noqa: E402
+from rke.ingestion.knowledge import iter_files  # noqa: E402
+from rke.rlm.environment import Environment, make_environment  # noqa: E402
+from rke.rlm.router import RLMRouter  # noqa: E402
+from rke.vector_store import VectorStore  # noqa: E402
+from rke.wiki.knowledge_base import KnowledgeBase, chunk_text  # noqa: E402
+from rke.wiki.manager import WikiManager, slugify  # noqa: E402
 
 PASSED: list[str] = []
 FAILED: list[tuple[str, str]] = []

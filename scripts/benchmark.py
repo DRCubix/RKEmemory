@@ -15,13 +15,23 @@ import random
 import shutil
 import statistics
 import time
+import uuid as _uuid_mod
 
 import psutil
 
-from rke.config import load_config
-from rke.graph_store import Entity, GraphStore, Relation
-from rke.vector_store import VectorStore
-from rke.wiki.knowledge_base import KnowledgeBase
+# ── Safety: auto-isolate to a /tmp scratch namespace ──────────────
+# Without this, the benchmark wipes the user's configured wiki and
+# Qdrant collection. Set BEFORE importing rke so load_config sees them.
+# Caller can still override.
+_run_id = _uuid_mod.uuid4().hex[:8]
+os.environ.setdefault("RKE_WIKI_PATH", f"/tmp/rke_bench_{_run_id}_wiki")
+os.environ.setdefault("RKE_QDRANT_COLLECTION", f"rke_bench_{_run_id}")
+os.environ.setdefault("RKE_FALKORDB_GRAPH", f"rke_bench_{_run_id}")
+
+from rke.config import load_config  # noqa: E402
+from rke.graph_store import Entity, GraphStore, Relation  # noqa: E402
+from rke.vector_store import VectorStore  # noqa: E402
+from rke.wiki.knowledge_base import KnowledgeBase  # noqa: E402
 
 random.seed(42)
 

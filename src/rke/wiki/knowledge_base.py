@@ -64,15 +64,27 @@ class KnowledgeBase:
     def _on_wiki_delete(self, page) -> None:
         """post_delete hook: drop the page's vector chunks from Qdrant.
 
+        Tenant-scoped — only fires for pages whose file path lives under
+        THIS KnowledgeBase's wiki root, so two KBs in the same process
+        don't poison each other's vector stores when one of them deletes
+        a page.
+
         Accepts either a WikiPage (preferred — gives full category for
-        precise filter) or a bare slug string (legacy fallback)."""
+        precise filter) or a bare slug string (legacy fallback; in that
+        case we cannot enforce tenancy and skip)."""
+        if not hasattr(page, "path") or page.path is None:
+            return  # legacy bare-slug call: no path → unsafe to dispatch
         try:
-            if hasattr(page, "category") and hasattr(page, "slug"):
-                self.vectors.delete_by_filter(
-                    {"category": page.category, "slug": page.slug},
-                )
-            else:
-                self.vectors.delete_by_filter({"slug": str(page)})
+            page_path = page.path.resolve()
+            root = self.wiki.root.resolve()
+            if not page_path.is_relative_to(root):
+                return  # belongs to a different KnowledgeBase tenant
+        except Exception:
+            return
+        try:
+            self.vectors.delete_by_filter(
+                {"category": page.category, "slug": page.slug},
+            )
         except Exception as exc:
             log.warning("vector cleanup on delete failed: %s", exc)
 
