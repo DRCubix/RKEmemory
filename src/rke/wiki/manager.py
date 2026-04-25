@@ -166,10 +166,14 @@ class WikiManager:
 
     def get_page(self, slug_or_title: str, category: str | None = None) -> WikiPage | None:
         slug = slugify(slug_or_title)
-        if category:
+        if category is not None:
+            # STRICT: when caller specifies a category, only look there.
+            # Falling back to rglob would silently hit a same-slug page in
+            # a different category and corrupt operations like
+            # lifecycle.set_expiry(..., category="missing") that expect
+            # None on miss.
             candidate = self.root / category / f"{slug}.md"
-            if candidate.exists():
-                return self._read_page(candidate)
+            return self._read_page(candidate) if candidate.exists() else None
         for path in self.root.rglob(f"{slug}.md"):
             return self._read_page(path)
         return None

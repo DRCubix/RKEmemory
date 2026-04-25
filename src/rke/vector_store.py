@@ -206,6 +206,54 @@ class VectorStore:
             return
         self.client.delete(collection_name=self._collection, points_selector=ids)
 
+    def delete_by_filter(
+        self,
+        match: dict[str, Any],
+        *,
+        min_chunk_index: int | None = None,
+    ) -> int:
+        """Delete every point whose payload exactly matches each key/value in
+        ``match``. If ``min_chunk_index`` is given, only points with
+        ``payload.chunk_index >= min_chunk_index`` are removed (the rest are
+        about to be overwritten by a fresh upsert).
+
+        Used by KnowledgeBase to evict stale chunks left over from a longer
+        previous revision of a page.
+        """
+        from qdrant_client.http.models import (
+            FieldCondition,
+            Filter,
+            FilterSelector,
+            MatchValue,
+            Range,
+        )
+
+        try:
+            self.ensure_collection()
+        except Exception:
+            return 0
+
+        must = [
+            FieldCondition(key=k, match=MatchValue(value=v))
+            for k, v in match.items()
+        ]
+        if min_chunk_index is not None:
+            must.append(FieldCondition(
+                key="chunk_index",
+                range=Range(gte=float(min_chunk_index)),
+            ))
+        flt = Filter(must=must)
+
+        try:
+            self.client.delete(
+                collection_name=self._collection,
+                points_selector=FilterSelector(filter=flt),
+            )
+            return 1
+        except Exception as exc:
+            log.warning("delete_by_filter failed: %s", exc)
+            return 0
+
     # ── Helpers ──────────────────────────────────────────────────
     @staticmethod
     def _to_result(hit) -> SearchResult:

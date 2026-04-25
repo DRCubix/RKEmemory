@@ -153,6 +153,19 @@ def main() -> int:
     msgs2 = cm2.history()
     check("Chat memory persists to disk", len(msgs2) == 3 and msgs2[0].content == "Hello")
 
+    # KB-backed mode: writes route through KnowledgeBase → vector index
+    # stays in sync with search_long_term().
+    from rke.wiki.knowledge_base import KnowledgeBase  # noqa: E402
+    kb_for_chat = KnowledgeBase(cfg)
+    cm_kb = ChatMemory(thread_id="kb-thread-int", kb=kb_for_chat,
+                       buffer_size=3, summarize_threshold=5)
+    cm_kb.add_user_message("Discuss FoobarUniqueXyzzy in this conversation")
+    cm_kb.add_assistant_message("Yes, FoobarUniqueXyzzy is configured")
+    time.sleep(0.3)
+    long_term = cm_kb.search_long_term("FoobarUniqueXyzzy", limit=3)
+    check("KB-backed chat content reachable via search_long_term", bool(long_term),
+          f"got {len(long_term)} hits")
+
     # Vector search still works (not regressed)
     print("\n--- Regression check: vector search ---")
     vs = VectorStore(cfg)

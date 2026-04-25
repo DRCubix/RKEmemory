@@ -84,11 +84,26 @@ class KnowledgeBase:
             }
             for i in range(len(chunks))
         ]
-        # Deterministic IDs so re-indexing replaces old chunks.
-        ids = [f"wiki:{page.slug}:{i}" for i in range(len(chunks))]
+        # Deterministic IDs scoped by (category, slug) so same-slug-different-
+        # category pages do not collide in the vector index.
+        prefix = f"wiki:{page.category}:{page.slug}"
+        ids = [f"{prefix}:{i}" for i in range(len(chunks))]
         # Convert to UUIDs since Qdrant requires UUID/int point IDs.
         import uuid as _uuid
         uuid_ids = [str(_uuid.uuid5(_uuid.NAMESPACE_URL, i)) for i in ids]
+
+        # Before upsert, evict any STALE chunks left over from a previous
+        # longer revision of this page. We delete every existing point
+        # whose payload matches this (category, slug) but whose
+        # chunk_index is beyond the new chunk count.
+        try:
+            self.vectors.delete_by_filter(
+                {"category": page.category, "slug": page.slug},
+                min_chunk_index=len(chunks),
+            )
+        except Exception as exc:
+            log.warning("stale-chunk cleanup skipped: %s", exc)
+
         self.vectors.upsert(chunks, metadatas=metas, ids=uuid_ids)
 
     def reindex_all(self) -> int:
