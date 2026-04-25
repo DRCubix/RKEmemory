@@ -134,3 +134,32 @@ def test_remove_via_wiki_manager_hook(tmp_path: Path):
 
     assert wm.delete_page("Ephemeral") is True
     assert idx.search("flibbertigibbet") == []
+
+
+def test_attach_twice_does_not_leak_stale_hooks(tmp_path: Path):
+    """Regression: Codex caught that attach() over an already-attached
+    instance left the previous index's hooks registered."""
+    from rke.wiki import manager as wm_mod
+
+    wm1 = WikiManager(_cfg(tmp_path / "a"))
+    WhooshIndex.attach(wm1, tmp_path / "idx_a")
+    hooks_after_first = (
+        len(wm_mod._post_create_hooks),
+        len(wm_mod._post_delete_hooks),
+    )
+
+    wm2 = WikiManager(_cfg(tmp_path / "b"))
+    WhooshIndex.attach(wm2, tmp_path / "idx_b")
+    hooks_after_second = (
+        len(wm_mod._post_create_hooks),
+        len(wm_mod._post_delete_hooks),
+    )
+
+    # The second attach should NOT add a new pair on top of the first —
+    # it should replace the previous index.
+    assert hooks_after_second == hooks_after_first
+
+    # And the surviving query backend should serve the second WikiManager.
+    wm2.create_page("Beta", "rare-token-xyz here", tags=["t"])
+    hits = wm2.query_wiki("rare-token-xyz")
+    assert hits and hits[0].title == "Beta"

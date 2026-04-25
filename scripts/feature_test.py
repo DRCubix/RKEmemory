@@ -59,7 +59,12 @@ def main() -> int:
     check("deep_merge recursive", merged == {"a": {"x": 1, "y": 2}})
     check("_coerce booleans", _coerce("true") is True and _coerce("false") is False)
     check("_coerce numerics", _coerce("42") == 42 and _coerce("3.14") == 3.14)
-    check("env override applied", cfg.qdrant["port"] == 6433, f"port={cfg.qdrant['port']}")
+    expected_port = int(os.environ.get("RKE_QDRANT_PORT", DEFAULTS["qdrant"]["port"]))
+    check(
+        "env override applied (port matches RKE_QDRANT_PORT or default)",
+        cfg.qdrant["port"] == expected_port,
+        f"port={cfg.qdrant['port']}, expected {expected_port}",
+    )
     check("config.wiki_path is Path", isinstance(cfg.wiki_path, Path))
 
     # ── 2. Wiki ──────────────────────────────────────────────────

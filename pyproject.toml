@@ -61,6 +61,7 @@ dev = [
     "ruff>=0.5.0",
     "mypy>=1.10.0",
     "whoosh>=2.7.4",   # needed for test_search_index.py (also exposed via [search])
+    "psutil>=5.9.0",   # used by scripts/benchmark.py for RSS sampling
 ]
 search = [
     "whoosh>=2.7.4",

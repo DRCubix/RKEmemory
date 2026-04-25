@@ -128,9 +128,14 @@ class WhooshIndex:
     def attach(cls, wm: WikiManager, index_dir: Path | str) -> WhooshIndex:
         """Create a WhooshIndex, wire hooks, and do an idempotent initial rebuild.
 
-        Subsequent create/delete calls on `wm` will keep the index in sync and
-        `wm.query_wiki()` will route through the BM25F backend.
+        If a previous WhooshIndex is already attached (to the same or a
+        different WikiManager), it is detached first so its stale hooks do
+        not keep firing. Subsequent create/delete calls on ``wm`` keep the
+        index in sync and ``wm.query_wiki()`` routes through the BM25F backend.
         """
+        if cls._attached is not None:
+            cls.detach()
+
         idx = cls(index_dir)
         idx.rebuild(wm.list_pages())
 
