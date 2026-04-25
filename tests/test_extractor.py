@@ -150,3 +150,35 @@ def test_extractor_top_level_exception_swallowed(tmp_path: Path):
 def test_extracted_entity_defaults():
     ent = ExtractedEntity(label="Project", name="Alpha")
     assert ent.properties == {}
+
+
+def test_attach_to_wiki_is_idempotent(tmp_path: Path):
+    """Regression: Codex caught that repeated attach_to_wiki calls stacked
+    duplicate closures because each call's closure has a different identity."""
+    from rke.knowledge.extractor import attach_to_wiki, detach_from_wiki
+    from rke.wiki import manager as wm_mod
+
+    graph = MagicMock()
+    attach_to_wiki(graph)
+    after_first = len(wm_mod._post_create_hooks)
+    attach_to_wiki(graph)
+    after_second = len(wm_mod._post_create_hooks)
+    attach_to_wiki(graph)
+    after_third = len(wm_mod._post_create_hooks)
+
+    assert after_first == after_second == after_third, (
+        f"hook count drifted: {after_first} -> {after_second} -> {after_third}"
+    )
+
+    detach_from_wiki()
+    assert len(wm_mod._post_create_hooks) == after_first - 1
+
+
+def test_detach_from_wiki_when_not_attached_is_a_noop():
+    from rke.knowledge.extractor import detach_from_wiki
+    from rke.wiki import manager as wm_mod
+
+    before = len(wm_mod._post_create_hooks)
+    detach_from_wiki()
+    detach_from_wiki()  # twice
+    assert len(wm_mod._post_create_hooks) == before

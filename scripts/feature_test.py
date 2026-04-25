@@ -59,12 +59,19 @@ def main() -> int:
     check("deep_merge recursive", merged == {"a": {"x": 1, "y": 2}})
     check("_coerce booleans", _coerce("true") is True and _coerce("false") is False)
     check("_coerce numerics", _coerce("42") == 42 and _coerce("3.14") == 3.14)
-    expected_port = int(os.environ.get("RKE_QDRANT_PORT", DEFAULTS["qdrant"]["port"]))
-    check(
-        "env override applied (port matches RKE_QDRANT_PORT or default)",
-        cfg.qdrant["port"] == expected_port,
-        f"port={cfg.qdrant['port']}, expected {expected_port}",
-    )
+    # Inject a unique sentinel env var, reload, and verify env > yaml > defaults
+    # precedence — robust regardless of any user-local config/rke.yaml.
+    sentinel = "feature-test-sentinel-xyz"
+    os.environ["RKE_FALKORDB__GRAPH"] = sentinel
+    try:
+        cfg2 = load_config()
+        check(
+            "env override applied (sentinel through layered loader)",
+            cfg2.falkordb["graph"] == sentinel,
+            f"got falkordb.graph={cfg2.falkordb['graph']!r}",
+        )
+    finally:
+        del os.environ["RKE_FALKORDB__GRAPH"]
     check("config.wiki_path is Path", isinstance(cfg.wiki_path, Path))
 
     # ── 2. Wiki ──────────────────────────────────────────────────

@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..graph_store import Entity, GraphStore, Relation
+from ..wiki import manager as _wiki_manager
 from ..wiki.manager import WikiPage, register_post_create
 
 log = logging.getLogger(__name__)
@@ -262,6 +263,13 @@ def _write_to_graph(graph: GraphStore, page: WikiPage, entities, relations) -> N
             log.warning("graph.add_relation(%r) failed: %s", rel.rel_type, exc)
 
 
+# Module-level reference to the most recently registered extraction hook,
+# so attach_to_wiki() is idempotent — repeated calls never stack duplicate
+# closures (each closure has a different identity, defeating the dedup in
+# register_post_create).
+_attached_hook = None
+
+
 def attach_to_wiki(
     graph: GraphStore,
     *,
@@ -269,9 +277,16 @@ def attach_to_wiki(
 ) -> None:
     """Register a post_create wiki hook that auto-feeds the graph.
 
-    Any failure (extractor error, graph write error, etc.) is logged but
-    NEVER raised — wiki page creation must not depend on graph availability.
+    Idempotent: repeated calls detach the previous hook first, so callers
+    never accumulate duplicate writes. Any failure (extractor error, graph
+    write error, etc.) is logged but NEVER raised — wiki page creation
+    must not depend on graph availability.
     """
+    global _attached_hook
+
+    # Detach any previous registration first.
+    detach_from_wiki()
+
     ex = extractor or EntityExtractor()
 
     def _hook(page: WikiPage) -> None:
@@ -282,3 +297,16 @@ def attach_to_wiki(
             log.warning("entity extraction hook failed for %r: %s", page.slug, exc)
 
     register_post_create(_hook)
+    _attached_hook = _hook
+
+
+def detach_from_wiki() -> None:
+    """Unregister the extraction hook installed by attach_to_wiki(), if any."""
+    global _attached_hook
+    if _attached_hook is None:
+        return
+    try:
+        _wiki_manager._post_create_hooks.remove(_attached_hook)
+    except (ValueError, AttributeError):
+        pass
+    _attached_hook = None
