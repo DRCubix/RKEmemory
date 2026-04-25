@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rke"
-version = "0.1.0"
+version = "0.1.1"
 description = "RKE — Recursive Knowledge Engine: multi-agent memory with RLM routing, LLM-Wiki, Qdrant vectors, and FalkorDB graph"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -6,6 +6,37 @@ All notable changes will be documented here. This project follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-04-24
+
+End-to-end validation against live Qdrant + FalkorDB completed. Two real
+compatibility bugs surfaced and were fixed.
+
+### Fixed
+- `rke.vector_store`: switched to `client.query_points()` because
+  `qdrant-client` 1.10+ removed `client.search()`. Falls back to legacy
+  `.search()` when `query_points` is absent.
+- `rke.vector_store`: tolerate `CollectionInfo` without `vectors_count`
+  (the field was removed in newer qdrant-client versions).
+- `rke.vector_store`: future-proof embedding-dim getter against the
+  `sentence-transformers` ≥3.0 rename
+  (`get_sentence_embedding_dimension` → `get_embedding_dimension`).
+- `docker-compose.yml`: pinned Qdrant to `v1.17.1` (the previously-listed
+  `v1.17.4` tag does not exist on Docker Hub).
+
+### Added
+- `scripts/e2e_smoke.py`: 7-stage end-to-end test exercising wiki create+
+  index, vector search, hybrid search, FalkorDB entity/relation/cypher,
+  combined KB query, agent context formatting, deterministic RLM router,
+  and lint. Verified passing against live Qdrant 1.17.1 + FalkorDB latest.
+
+### Security / Repo posture
+- Branch protection enabled on `master` (requires `pytest (py3.10)`,
+  `pytest (py3.11)`, `pytest (py3.12)`, and `ruff` to pass).
+- Dependabot security updates enabled (auto-PRs on CVEs).
+- Commit history rewritten so all author/committer emails use the GitHub
+  noreply form (`<id>+DRCubix@users.noreply.github.com`); the prior
+  non-noreply author address no longer appears in any reachable commit.
+
 ## [0.1.0] - 2026-04-24
 
 First real, runnable release. The 1.0.0 tag in the initial commit was a
