@@ -18,6 +18,7 @@ No dependency on langchain — this re-implements the subset we care about.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -27,6 +28,8 @@ from typing import Any
 from ..config import Config, load_config
 from ..wiki.knowledge_base import CombinedHit, KnowledgeBase
 from ..wiki.manager import WikiManager, slugify
+
+log = logging.getLogger(__name__)
 
 _VALID_ROLES = {"user", "assistant", "system"}
 # Matches a block header: "### 2024-01-01T00:00:00+00:00 user [optional JSON]".
@@ -163,7 +166,14 @@ class ChatMemory:
             metadata=dict(metadata),
         )
         self._buffer.append(msg)
-        self._persist()
+        # IMPORTANT: persist (cheap, wiki-only) and index this single turn
+        # separately. v0.2.x routed the whole thread page through
+        # kb.add_page on every turn, which made the indexed chunk be the
+        # ENTIRE thread — search_long_term then surfaced the thread page
+        # rather than the relevant turn. Now the buffer-page write is
+        # plain wiki, and each turn is added to KB as its own small chunk.
+        self._persist_buffer_only()
+        self._index_turn(msg)
         return msg
 
     def history(self, last_n: int | None = None) -> list[Message]:
@@ -235,6 +245,23 @@ class ChatMemory:
             )
         return self.kb.query(query, wiki_limit=limit, vector_limit=limit)
 
+    def answer(self, question: str, *, limit: int = 5) -> str:
+        """Retrieve relevant turns/archives and let the RLM router compose
+        an answer. With no LLM provider configured, the deterministic
+        fallback returns a synthesized 'top hits' summary. With
+        RKE_LLM_PROVIDER set, the router calls the LLM with the retrieved
+        chunks as evidence — which is what the published LOCOMO/LME/DMR
+        eval harnesses score against."""
+        if self.kb is None:
+            raise RuntimeError(
+                "answer() requires a KnowledgeBase; pass kb= on construction",
+            )
+        # Imported lazily to avoid a hard dependency on the RLM module.
+        from ..rlm.router import RLMRouter
+        router = RLMRouter(config=self.config, kb=self.kb)
+        result = router.complete(query=question)
+        return result.answer
+
     # ── Internal ─────────────────────────────────────────────────
     def _page_title(self) -> str:
         # Titles become slugs via slugify, so keep it aligned with self.slug.
@@ -247,10 +274,10 @@ class ChatMemory:
         return _parse_messages(page.body)
 
     def _persist(self) -> None:
+        """Legacy whole-buffer persist. Kept for clear()/summarize_and_archive
+        which need to rewrite the buffer page atomically. Per-turn calls go
+        through _persist_buffer_only + _index_turn instead."""
         body = _render_messages(self._buffer) if self._buffer else ""
-        # When a KnowledgeBase is wired in, route through its add_page so
-        # the vector index stays in sync (search_long_term() relies on it).
-        # Without a KB, fall back to a plain wiki write.
         if self.kb is not None:
             self.kb.add_page(
                 title=self._page_title(),
@@ -266,6 +293,41 @@ class ChatMemory:
                 tags=["thread", self.slug],
                 overwrite=True,
             )
+
+    def _persist_buffer_only(self) -> None:
+        """Cheap wiki-only write of the thread buffer page. Does NOT route
+        through kb.add_page so the whole-thread blob is not re-indexed on
+        every turn. Per-turn indexing is handled by _index_turn()."""
+        body = _render_messages(self._buffer) if self._buffer else ""
+        self.wiki.create_page(
+            self._page_title(),
+            body,
+            category=self._category,
+            tags=["thread", self.slug],
+            overwrite=True,
+        )
+
+    def _index_turn(self, msg: Message) -> None:
+        """Add one small wiki page per turn (routed through KB so it gets
+        embedded as its own chunk). This is the chunk search_long_term will
+        actually surface for retrieval — instead of the whole thread page."""
+        if self.kb is None:
+            return
+        # Stable per-turn slug: index = current buffer position. Idempotent
+        # if the same buffer index is re-indexed; collision-free across
+        # threads thanks to the (category, slug) composite KB key.
+        turn_idx = len(self._buffer) - 1
+        title = f"turn-{turn_idx:05d}"
+        body = f"_role: {msg.role}_  _at: {msg.timestamp}_\n\n{msg.content}"
+        try:
+            self.kb.add_page(
+                title=title,
+                body=body,
+                category=f"threads/{self.slug}/turns",
+                tags=["thread-turn", self.slug, msg.role],
+            )
+        except Exception as exc:
+            log.warning("turn-indexing failed for %s/%s: %s", self.slug, title, exc)
 
     def _next_archive_n(self) -> int:
         existing = self.wiki.list_pages(category=self._archive_category)
